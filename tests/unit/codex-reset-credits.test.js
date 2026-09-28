@@ -27,6 +27,10 @@ vi.mock("@/app/api/usage/[connectionId]/route.js", () => ({
   refreshAndUpdateCredentials: mocks.refreshAndUpdateCredentials,
 }));
 
+vi.mock("@/lib/workspaces/requestContext.js", () => ({
+  withDashboardWorkspace: (request, minimumRole, callback) => callback({}),
+}));
+
 vi.mock("open-sse/services/usage.js", () => ({
   getCodexRateLimitResetCredits: mocks.getCodexRateLimitResetCredits,
   consumeCodexRateLimitResetCredit: mocks.consumeCodexRateLimitResetCredit,

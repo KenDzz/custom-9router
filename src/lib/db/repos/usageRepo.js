@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
-import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { getWorkspaceContext, requireWorkspaceId } from "@/lib/workspaces/requestContext.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -14,35 +14,40 @@ const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 
-// In-memory state shared across Next.js modules
-if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
-if (!global._lastErrorProvider) global._lastErrorProvider = { provider: "", ts: 0 };
+// In-memory state shared across Next.js modules, partitioned by workspace.
+if (!global._usageWorkspaceState) global._usageWorkspaceState = new Map();
 if (!global._statsEmitter) {
   global._statsEmitter = new EventEmitter();
   global._statsEmitter.setMaxListeners(50);
 }
-if (!global._pendingTimers) global._pendingTimers = {};
-if (!global._recentRing) global._recentRing = { items: [], initialized: false };
-if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
-if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
-
-const pendingRequests = global._pendingRequests;
-const lastErrorProvider = global._lastErrorProvider;
-const pendingTimers = global._pendingTimers;
-const recentRing = global._recentRing;
-const connCache = global._connectionMapCache;
-const statsEmitTimers = global._statsEmitTimers;
 
 export const statsEmitter = global._statsEmitter;
 
-function scheduleStatsEvent(event, delayMs = 150) {
+function getWorkspaceState(workspaceId = requireWorkspaceId()) {
+  let state = global._usageWorkspaceState.get(workspaceId);
+  if (!state) {
+    state = {
+      pendingRequests: { byModel: {}, byAccount: {} },
+      lastErrorProvider: { provider: "", ts: 0 },
+      pendingTimers: {},
+      recentRing: { items: [], initialized: false },
+      connectionMapCache: { map: {}, ts: 0 },
+      statsEmitTimers: { pending: null, update: null },
+    };
+    global._usageWorkspaceState.set(workspaceId, state);
+  }
+  return state;
+}
+
+function scheduleStatsEvent(event, delayMs = 150, workspaceId = requireWorkspaceId()) {
+  const state = getWorkspaceState(workspaceId);
   const key = event === "update" ? "update" : "pending";
-  if (statsEmitTimers[key]) return;
-  statsEmitTimers[key] = setTimeout(() => {
-    statsEmitTimers[key] = null;
-    statsEmitter.emit(event);
+  if (state.statsEmitTimers[key]) return;
+  state.statsEmitTimers[key] = setTimeout(() => {
+    state.statsEmitTimers[key] = null;
+    statsEmitter.emit(event, { workspaceId });
   }, delayMs);
-  statsEmitTimers[key]?.unref?.();
+  state.statsEmitTimers[key]?.unref?.();
 }
 
 function getLocalDateKey(timestamp) {
@@ -97,14 +102,16 @@ function aggregateEntryToDay(day, entry) {
   addToCounter(day.byEndpoint, epKey, { ...vals, meta: { endpoint, rawModel: entry.model, provider: entry.provider } });
 }
 
-function pushToRing(entry) {
+function pushToRing(workspaceId, entry) {
+  const recentRing = getWorkspaceState(workspaceId).recentRing;
   recentRing.items.push(entry);
   if (recentRing.items.length > RING_CAP) {
     recentRing.items = recentRing.items.slice(-RING_CAP);
   }
 }
 
-async function getConnectionMapCached() {
+async function getConnectionMapCached(workspaceId = requireWorkspaceId()) {
+  const connCache = getWorkspaceState(workspaceId).connectionMapCache;
   if (Date.now() - connCache.ts < CONN_CACHE_TTL_MS) return connCache.map;
   try {
     const { getProviderConnections } = await import("./connectionsRepo.js");
@@ -117,12 +124,17 @@ async function getConnectionMapCached() {
   return connCache.map;
 }
 
-async function ensureRingInitialized() {
+async function ensureRingInitialized(workspaceId = requireWorkspaceId()) {
+  const recentRing = getWorkspaceState(workspaceId).recentRing;
   if (recentRing.initialized) return;
   recentRing.initialized = true;
   try {
     const db = await getAdapter();
-    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
+    const rows = db.all(
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens
+       FROM usageHistory WHERE workspaceId = ? ORDER BY id DESC LIMIT ?`,
+      [workspaceId, RING_CAP],
+    );
     recentRing.items = rows.reverse().map((r) => ({
       timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
       apiKey: r.apiKey, endpoint: r.endpoint, cost: r.cost, status: r.status,
@@ -150,6 +162,8 @@ async function calculateCost(provider, model, tokens) {
 }
 
 export function trackPendingRequest(model, provider, connectionId, started, error = false) {
+  const workspaceId = requireWorkspaceId();
+  const { pendingRequests, lastErrorProvider, pendingTimers } = getWorkspaceState(workspaceId);
   const modelKey = provider ? `${model} (${provider})` : model;
   const timerKey = `${connectionId}|${modelKey}`;
 
@@ -177,7 +191,7 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
       if (connectionId && pendingRequests.byAccount[connectionId]?.[modelKey] > 0) {
         pendingRequests.byAccount[connectionId][modelKey] = 0;
       }
-      scheduleStatsEvent("pending");
+      scheduleStatsEvent("pending", 150, workspaceId);
     }, PENDING_TIMEOUT_MS);
   } else {
     clearTimeout(pendingTimers[timerKey]);
@@ -190,12 +204,14 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
   }
 
   // [PENDING] console line removed; lifecycle is visible via "▶" and "📊 done" lines
-  scheduleStatsEvent("pending");
+  scheduleStatsEvent("pending", 150, workspaceId);
 }
 
 export async function getActiveRequests() {
+  const workspaceId = requireWorkspaceId();
+  const { pendingRequests, lastErrorProvider, recentRing } = getWorkspaceState(workspaceId);
   const activeRequests = [];
-  const connectionMap = await getConnectionMapCached();
+  const connectionMap = await getConnectionMapCached(workspaceId);
 
   for (const [connectionId, models] of Object.entries(pendingRequests.byAccount)) {
     for (const [modelKey, count] of Object.entries(models)) {
@@ -211,7 +227,7 @@ export async function getActiveRequests() {
     }
   }
 
-  await ensureRingInitialized();
+  await ensureRingInitialized(workspaceId);
   const seen = new Set();
   const recentRequests = [...recentRing.items]
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
@@ -238,14 +254,27 @@ export async function getActiveRequests() {
   return { activeRequests, recentRequests, errorProvider };
 }
 
-export async function saveRequestUsage(entry) {
+export function saveRequestUsage(entry) {
+  const context = getWorkspaceContext();
+  if (context) context.usageRecorded = true;
+  const write = persistRequestUsage(entry);
+  context?.pendingUsageWrites?.add(write);
+  const clear = () => context?.pendingUsageWrites?.delete(write);
+  write.then(clear, clear);
+  return write;
+}
+
+async function persistRequestUsage(entry) {
+  const workspaceId = requireWorkspaceId();
+  const userId = getWorkspaceContext()?.userId || null;
   try {
+    const record = { ...entry, workspaceId, userId };
     const db = await getAdapter();
 
-    if (!entry.timestamp) entry.timestamp = new Date().toISOString();
-    entry.cost = await calculateCost(entry.provider, entry.model, entry.tokens);
+    if (!record.timestamp) record.timestamp = new Date().toISOString();
+    record.cost = await calculateCost(record.provider, record.model, record.tokens);
 
-    const tokens = entry.tokens || {};
+    const tokens = record.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
 
@@ -256,7 +285,8 @@ export async function saveRequestUsage(entry) {
     db.transaction(() => {
       const existing = db.get(
         `SELECT id, endpoint FROM usageHistory
-         WHERE timestamp = ?
+         WHERE workspaceId = ?
+           AND timestamp = ?
            AND COALESCE(provider, '') = COALESCE(?, '')
            AND COALESCE(model, '') = COALESCE(?, '')
            AND COALESCE(connectionId, '') = COALESCE(?, '')
@@ -265,48 +295,60 @@ export async function saveRequestUsage(entry) {
            AND completionTokens = ?
          ORDER BY id DESC LIMIT 1`,
         [
-          entry.timestamp, entry.provider || null, entry.model || null,
-          entry.connectionId || null, entry.apiKey || null,
+          workspaceId, record.timestamp, record.provider || null, record.model || null,
+          record.connectionId || null, record.apiKey || null,
           promptTokens, completionTokens,
         ]
       );
 
       if (existing) {
-        if (!existing.endpoint && entry.endpoint) {
-          db.run(`UPDATE usageHistory SET endpoint = ? WHERE id = ?`, [entry.endpoint, existing.id]);
+        if (!existing.endpoint && record.endpoint) {
+          db.run(
+            `UPDATE usageHistory SET endpoint = ? WHERE id = ? AND workspaceId = ?`,
+            [record.endpoint, existing.id, workspaceId],
+          );
         }
         return;
       }
 
       db.run(
-        `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(workspaceId, userId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          entry.timestamp, entry.provider || null, entry.model || null,
-          entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
-          promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
+          workspaceId, record.userId, record.timestamp, record.provider || null, record.model || null,
+          record.connectionId || null, record.apiKey || null, record.endpoint || null,
+          promptTokens, completionTokens, record.cost || 0, record.status || "ok",
           stringifyJson(tokens), stringifyJson({}),
         ]
       );
 
-      const dateKey = getLocalDateKey(entry.timestamp);
-      const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
+      const dateKey = getLocalDateKey(record.timestamp);
+      const row = db.get(
+        `SELECT data FROM usageDaily WHERE workspaceId = ? AND dateKey = ?`,
+        [workspaceId, dateKey],
+      );
       const day = row ? parseJson(row.data, {}) : {
         requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
         byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
       };
-      aggregateEntryToDay(day, entry);
-      db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
+      aggregateEntryToDay(day, record);
+      db.run(
+        `INSERT INTO usageDaily(workspaceId, dateKey, data) VALUES(?, ?, ?)
+         ON CONFLICT(workspaceId, dateKey) DO UPDATE SET data = excluded.data`,
+        [workspaceId, dateKey, stringifyJson(day)],
+      );
 
-      // Atomic counter increment in same transaction
-      const cur = db.get(`SELECT value FROM _meta WHERE key = 'totalRequestsLifetime'`);
-      const next = (cur ? parseInt(cur.value, 10) : 0) + 1;
-      db.run(`INSERT INTO _meta(key, value) VALUES('totalRequestsLifetime', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [String(next)]);
+      db.run(
+        `INSERT INTO workspaceUsageMeta(workspaceId, totalRequestsLifetime) VALUES(?, 1)
+         ON CONFLICT(workspaceId) DO UPDATE SET totalRequestsLifetime = totalRequestsLifetime + 1`,
+        [workspaceId],
+      );
       inserted = true;
     });
 
     if (inserted) {
-      pushToRing(entry);
-      scheduleStatsEvent("update", 250);
+      pushToRing(workspaceId, record);
+      scheduleStatsEvent("update", 250, workspaceId);
     }
   } catch (e) {
     console.error("Failed to save usage stats:", e);
@@ -314,9 +356,10 @@ export async function saveRequestUsage(entry) {
 }
 
 export async function getUsageHistory(filter = {}) {
+  const workspaceId = requireWorkspaceId();
   const db = await getAdapter();
-  const conds = [];
-  const params = [];
+  const conds = ["workspaceId = ?"];
+  const params = [workspaceId];
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
@@ -333,17 +376,22 @@ export async function getUsageHistory(filter = {}) {
   }));
 }
 
-function loadDaysInRange(adapter, maxDays) {
+function loadDaysInRange(adapter, workspaceId, maxDays) {
   if (maxDays == null) {
-    return adapter.all(`SELECT dateKey, data FROM usageDaily`);
+    return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE workspaceId = ?`, [workspaceId]);
   }
   const today = new Date();
   const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - maxDays + 1);
   const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
-  return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
+  return adapter.all(
+    `SELECT dateKey, data FROM usageDaily WHERE workspaceId = ? AND dateKey >= ?`,
+    [workspaceId, cutoffKey],
+  );
 }
 
 export async function getUsageStats(period = "all") {
+  const workspaceId = requireWorkspaceId();
+  const { pendingRequests, lastErrorProvider } = getWorkspaceState(workspaceId);
   const db = await getAdapter();
 
   const [{ getProviderConnections }, { getApiKeys }, { getProviderNodes }] = await Promise.all([
@@ -369,7 +417,11 @@ export async function getUsageStats(period = "all") {
   for (const k of allApiKeys) apiKeyMap[k.key] = { name: k.name, id: k.id, createdAt: k.createdAt };
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
-  const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
+  const recentRows = db.all(
+    `SELECT timestamp, provider, model, tokens, status FROM usageHistory
+     WHERE workspaceId = ? ORDER BY id DESC LIMIT 100`,
+    [workspaceId],
+  );
   const seen = new Set();
   const recentRequests = recentRows
     .map((r) => {
@@ -429,8 +481,9 @@ export async function getUsageStats(period = "all") {
     stats.last10Minutes.push(bucketMap[ts]);
   }
   const recent10 = db.all(
-    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ? AND timestamp <= ?`,
-    [tenMinutesAgo.toISOString(), now.toISOString()]
+    `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory
+     WHERE workspaceId = ? AND timestamp >= ? AND timestamp <= ?`,
+    [workspaceId, tenMinutesAgo.toISOString(), now.toISOString()]
   );
   for (const r of recent10) {
     const tt = new Date(r.timestamp).getTime();
@@ -448,7 +501,7 @@ export async function getUsageStats(period = "all") {
   if (useDailySummary) {
     const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
     const maxDays = periodDays[period] || null;
-    const dayRows = loadDaysInRange(db, maxDays);
+    const dayRows = loadDaysInRange(db, workspaceId, maxDays);
 
     for (const dr of dayRows) {
       const dateKey = dr.dateKey;
@@ -540,8 +593,9 @@ export async function getUsageStats(period = "all") {
     // Overlay precise lastUsed timestamps from history
     const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
     const histRows = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(overlayCutoff).toISOString()]
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory
+       WHERE workspaceId = ? AND timestamp >= ?`,
+      [workspaceId, new Date(overlayCutoff).toISOString()]
     );
     for (const e of histRows) {
       const ts = e.timestamp;
@@ -574,8 +628,9 @@ export async function getUsageStats(period = "all") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
     const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
-      [cutoff]
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens
+       FROM usageHistory WHERE workspaceId = ? AND timestamp >= ?`,
+      [workspaceId, cutoff]
     );
 
     for (const r of filtered) {
@@ -659,6 +714,7 @@ export async function getUsageStats(period = "all") {
 }
 
 export async function getChartData(period = "7d") {
+  const workspaceId = requireWorkspaceId();
   const db = await getAdapter();
   const now = Date.now();
 
@@ -673,8 +729,9 @@ export async function getChartData(period = "7d") {
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
     const rows = db.all(
-      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(startTime).toISOString()]
+      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory
+       WHERE workspaceId = ? AND timestamp >= ?`,
+      [workspaceId, new Date(startTime).toISOString()]
     );
     for (const r of rows) {
       const t = new Date(r.timestamp).getTime();
@@ -696,8 +753,9 @@ export async function getChartData(period = "7d") {
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
     const rows = db.all(
-      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory WHERE timestamp >= ?`,
-      [new Date(startTime).toISOString()]
+      `SELECT timestamp, promptTokens, completionTokens, cost FROM usageHistory
+       WHERE workspaceId = ? AND timestamp >= ?`,
+      [workspaceId, new Date(startTime).toISOString()]
     );
     for (const r of rows) {
       const t = new Date(r.timestamp).getTime();
@@ -714,7 +772,7 @@ export async function getChartData(period = "7d") {
   const labelFn = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   // Build map of dateKey → day data
-  const dayRows = loadDaysInRange(db, bucketCount);
+  const dayRows = loadDaysInRange(db, workspaceId, bucketCount);
   const dayMap = {};
   for (const r of dayRows) dayMap[r.dateKey] = parseJson(r.data, {});
 
@@ -740,11 +798,13 @@ function formatLogDate(date = new Date()) {
 export async function appendRequestLog() {}
 
 export async function getRecentLogs(limit = 200) {
+  const workspaceId = requireWorkspaceId();
   try {
     const db = await getAdapter();
     const rows = db.all(
-      `SELECT timestamp, provider, model, connectionId, promptTokens, completionTokens, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`,
-      [limit],
+      `SELECT timestamp, provider, model, connectionId, promptTokens, completionTokens, status, tokens
+       FROM usageHistory WHERE workspaceId = ? ORDER BY id DESC LIMIT ?`,
+      [workspaceId, limit],
     );
     if (!rows.length) return [];
 

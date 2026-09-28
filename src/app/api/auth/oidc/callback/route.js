@@ -10,11 +10,64 @@ import {
   verifyOidcIdToken,
 } from "@/lib/auth/oidc";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
+import {
+  createUser,
+  getUserByEmail,
+  getUserByOidc,
+  getUserByUsername,
+  normalizeIdentifier,
+  updateUser,
+} from "@/lib/db/repos/usersRepo.js";
+import { addMember, getWorkspacesForUser } from "@/lib/db/repos/workspacesRepo.js";
+import { DEFAULT_WORKSPACE_ID, WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 function clearOidcCookies(cookieStore) {
   cookieStore.delete("oidc_state");
   cookieStore.delete("oidc_nonce");
   cookieStore.delete("oidc_code_verifier");
+}
+
+async function uniqueOidcUsername(email, subject) {
+  const seed = normalizeIdentifier(email?.split("@")[0] || `oidc-${subject}`)
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "oidc-user";
+  let candidate = seed;
+  for (let suffix = 2; await getUserByUsername(candidate); suffix += 1) {
+    candidate = `${seed}-${suffix}`;
+  }
+  return candidate;
+}
+
+async function resolveOidcUser({ issuer, payload }) {
+  const subject = String(payload.sub || "").trim();
+  if (!subject) throw new Error("OIDC token is missing subject");
+  const email = normalizeIdentifier(pickOidcEmail(payload));
+  const displayName = pickOidcDisplayName(payload);
+
+  let user = await getUserByOidc(issuer, subject);
+  if (!user && email) user = await getUserByEmail(email);
+
+  if (user) {
+    return updateUser(user.id, {
+      ...(email ? { email } : {}),
+      ...(displayName ? { displayName } : {}),
+      oidcIssuer: issuer,
+      oidcSubject: subject,
+    });
+  }
+
+  user = await createUser({
+    username: await uniqueOidcUsername(email, subject),
+    email: email || null,
+    displayName: displayName || email || "OIDC user",
+    oidcIssuer: issuer,
+    oidcSubject: subject,
+  });
+  // Before workspaces, every successful OIDC login could manage providers.
+  // Preserve that capability for newly-provisioned identities without granting
+  // system-owner privileges over global settings or the Default workspace.
+  await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.ADMIN);
+  return user;
 }
 
 export async function GET(request) {
@@ -71,8 +124,20 @@ export async function GET(request) {
       nonce: storedNonce,
     });
 
+    const user = await resolveOidcUser({ issuer: discoveredIssuer, payload });
+    let memberships = await getWorkspacesForUser(user.id);
+    if (memberships.length === 0) {
+      await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.ADMIN);
+      memberships = await getWorkspacesForUser(user.id);
+    }
+    const activeWorkspace = memberships.find((workspace) => workspace.isDefault) || memberships[0];
+
     clearOidcCookies(cookieStore);
     await setDashboardAuthCookie(cookieStore, request, {
+      sub: user.id,
+      userId: user.id,
+      activeWorkspaceId: activeWorkspace?.id || DEFAULT_WORKSPACE_ID,
+      loginMethod: "oidc",
       oidc: true,
       oidcSub: payload.sub || null,
       oidcEmail: pickOidcEmail(payload) || null,

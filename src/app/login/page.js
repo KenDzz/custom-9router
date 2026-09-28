@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, Button, Input } from "@/shared/components";
 
 export default function LoginPage() {
+  const [identifier, setIdentifier] = useState("admin");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [resetHint, setResetHint] = useState("");
@@ -67,7 +68,7 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ identifier, password }),
       });
 
       if (res.ok) {
@@ -194,6 +195,19 @@ export default function LoginPage() {
                 )}
 
                 <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium">Username or email</label>
+                  <Input
+                    type="text"
+                    placeholder="admin"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    required
+                    autoComplete="username"
+                    autoFocus={!oidcAvailable}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-2">
                   <label className="text-sm font-medium">Password</label>
                   <Input
                     type="password"
@@ -201,7 +215,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    autoFocus={!oidcAvailable}
+                    autoComplete="current-password"
                   />
                   {error && <p className="text-xs text-red-500">{error}</p>}
                   {retryAfter > 0 && (

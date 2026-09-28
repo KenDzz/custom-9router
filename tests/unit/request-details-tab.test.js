@@ -6,6 +6,16 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 
+vi.mock("@/lib/workspaces/requestContext.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
+  return {
+    ...actual,
+    withDashboardWorkspace: (request, minimumRole, callback) =>
+      actual.runWithWorkspace({ workspaceId: DEFAULT_WORKSPACE_ID }, () => callback({})),
+  };
+});
+
 const originalDataDir = process.env.DATA_DIR;
 let tempDir;
 let db;
@@ -22,13 +32,17 @@ beforeAll(async () => {
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
-  await db.updateSettings({ enableObservability2: true, observabilityBatchSize: 1 });
+  const { enterWorkspaceForTest } = await import("@/lib/workspaces/requestContext.js");
+  const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
+  enterWorkspaceForTest({ workspaceId: DEFAULT_WORKSPACE_ID });
+  await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
   adapter = await getAdapter();
 });
 
-afterAll(() => {
+afterAll(async () => {
+  await db?.closeDb?.();
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
@@ -38,8 +52,10 @@ describe("request details — tab crash-risk cases", () => {
   it("corrupt data column → parseJson fallback {}, no throw", async () => {
     // Inject a row with invalid JSON directly, bypassing save path
     adapter.run(
-      `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-      ["corrupt-1", new Date().toISOString(), "openai", "gpt-4", null, "ok", "{not-valid-json"]
+      `INSERT INTO requestDetails(id, workspaceId, timestamp, provider, model, connectionId, status, data)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+      ["corrupt-1", "00000000-0000-4000-8000-000000000001", new Date().toISOString(),
+        "openai", "gpt-4", null, "ok", "{not-valid-json"]
     );
 
     const res = await db.getRequestDetails({ provider: "openai" });
@@ -99,8 +115,10 @@ describe("request details — tab crash-risk cases", () => {
 
   it("missing tokens/timestamp on row → getInputTokens-style access safe", async () => {
     adapter.run(
-      `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-      ["sparse-1", new Date().toISOString(), "openai", null, null, null, JSON.stringify({ id: "sparse-1" })]
+      `INSERT INTO requestDetails(id, workspaceId, timestamp, provider, model, connectionId, status, data)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+      ["sparse-1", "00000000-0000-4000-8000-000000000001", new Date().toISOString(),
+        "openai", null, null, null, JSON.stringify({ id: "sparse-1" })]
     );
     const got = await db.getRequestDetailById("sparse-1");
     expect(got.tokens).toBeUndefined();

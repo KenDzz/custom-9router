@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createProviderNode, getProviderNodes } from "@/models";
 import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,11 @@ const CUSTOM_EMBEDDING_DEFAULTS = {
 };
 
 // GET /api/provider-nodes - List all provider nodes
-export async function GET() {
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet());
+}
+
+async function handleGet() {
   try {
     const nodes = await getProviderNodes();
     return NextResponse.json({ nodes });
@@ -30,6 +36,10 @@ export async function GET() {
 
 // POST /api/provider-nodes - Create provider node
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const body = await request.json();
     const { name, prefix, apiType, baseUrl, type } = body;

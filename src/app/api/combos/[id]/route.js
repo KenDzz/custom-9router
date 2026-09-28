@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 import { getComboById, updateCombo, deleteCombo, getComboByName } from "@/lib/localDb";
 import { resetComboRotation } from "open-sse/services/combo.js";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 
 // GET /api/combos/[id] - Get combo by ID
 export async function GET(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request, { params }));
+}
+
+async function handleGet(request, { params }) {
   try {
     const { id } = await params;
     const combo = await getComboById(id);
@@ -24,6 +30,10 @@ export async function GET(request, { params }) {
 
 // PUT /api/combos/[id] - Update combo
 export async function PUT(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request, { params }));
+}
+
+async function handlePut(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
@@ -62,6 +72,10 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/combos/[id] - Delete combo
 export async function DELETE(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request, { params }));
+}
+
+async function handleDelete(request, { params }) {
   try {
     const { id } = await params;
     const prev = await getComboById(id);

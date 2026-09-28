@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
-import bcrypt from "bcryptjs";
+import { getDashboardAuthSession } from "@/lib/auth/dashboardSession.js";
+import { getUserById, setPassword, verifyPassword } from "@/lib/db/repos/usersRepo.js";
+import { MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,9 +16,16 @@ const SETTINGS_RESPONSE_HEADERS = {
 // Secrets must never be mass-assigned from request body (CWE-915)
 const PROTECTED_SETTING_KEYS = ["password", "mitmSudoEncrypted"];
 
-export async function GET() {
+async function getPasswordOwner(request) {
+  const token = request?.cookies?.get("auth_token")?.value;
+  const session = token ? await getDashboardAuthSession(token) : null;
+  return getUserById(session?.userId || MIGRATED_ADMIN_USER_ID);
+}
+
+export async function GET(request) {
   try {
     const settings = await getSettings();
+    const passwordOwner = await getPasswordOwner(request);
     const { password, oidcClientSecret, ...safeSettings } = settings;
     safeSettings.oidcConfigured = !!(safeSettings.oidcIssuerUrl && safeSettings.oidcClientId && oidcClientSecret);
     
@@ -27,7 +36,7 @@ export async function GET() {
       ...safeSettings, 
       enableRequestLogs,
       enableTranslator,
-      hasPassword: !!password
+      hasPassword: !!passwordOwner?.passwordHash
     }, { headers: SETTINGS_RESPONSE_HEADERS });
   } catch (error) {
     console.log("Error getting settings:", error);
@@ -44,28 +53,15 @@ export async function PATCH(request) {
 
     // If updating password, hash it
     if (body.newPassword) {
-      const settings = await getSettings();
-      const currentHash = settings.password;
-
-      // Verify current password if it exists
-      if (currentHash) {
-        if (!body.currentPassword) {
-          return NextResponse.json({ error: "Current password required" }, { status: 400 });
-        }
-        const isValid = await bcrypt.compare(body.currentPassword, currentHash);
-        if (!isValid) {
-          return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
-        }
-      } else {
-        // First time setting password, no current password needed
-        // Allow empty currentPassword or default "123456"
-        if (body.currentPassword && body.currentPassword !== "123456") {
-           return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
-        }
+      const session = await getDashboardAuthSession(request.cookies.get("auth_token")?.value);
+      const user = session?.userId ? await getUserById(session.userId) : null;
+      if (!user) {
+        return NextResponse.json({ error: "Authentication required" }, { status: 401 });
       }
-
-      const salt = await bcrypt.genSalt(10);
-      body.password = await bcrypt.hash(body.newPassword, salt);
+      if (!(await verifyPassword(user, body.currentPassword))) {
+        return NextResponse.json({ error: "Invalid current password" }, { status: 401 });
+      }
+      await setPassword(user.id, body.newPassword);
       delete body.newPassword;
       delete body.currentPassword;
     }
@@ -77,6 +73,7 @@ export async function PATCH(request) {
     }
 
     const settings = await updateSettings(body);
+    const passwordOwner = await getPasswordOwner(request);
 
     // Apply outbound proxy settings immediately (no restart required)
     if (
@@ -110,6 +107,7 @@ export async function PATCH(request) {
 
     const { password, oidcClientSecret, ...safeSettings } = settings;
     safeSettings.oidcConfigured = !!(safeSettings.oidcIssuerUrl && safeSettings.oidcClientId && oidcClientSecret);
+    safeSettings.hasPassword = !!passwordOwner?.passwordHash;
     return NextResponse.json(safeSettings, { headers: SETTINGS_RESPONSE_HEADERS });
   } catch (error) {
     console.log("Error updating settings:", error);

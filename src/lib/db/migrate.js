@@ -7,6 +7,7 @@ import { getMetaSync, setMetaSync } from "./helpers/metaStore.js";
 import { makeBackupDir, backupFile, backupDbLite, pruneOldBackups } from "./backup.js";
 import { getAppVersion } from "./version.js";
 import { stringifyJson } from "./helpers/jsonCol.js";
+import { DEFAULT_WORKSPACE_ID, MIGRATED_ADMIN_USER_ID } from "../workspaces/constants.js";
 
 // Marker file: prevents re-importing legacy JSON when user wipes data.sqlite.
 const MIGRATED_MARKER = path.join(DB_DIR, ".migrated-from-json");
@@ -113,56 +114,61 @@ function importLegacyMain(adapter, data) {
   if (!data || typeof data !== "object") return;
 
   if (data.settings) {
-    adapter.run(`INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`, [stringifyJson(data.settings)]);
+    // Legacy password hash belongs on the migrated admin user, not global settings.
+    const { password, ...settingsRest } = data.settings;
+    adapter.run(`INSERT INTO settings(id, data) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data`, [stringifyJson(settingsRest)]);
+    if (password) {
+      adapter.run(`UPDATE users SET passwordHash = ?, updatedAt = ? WHERE id = ?`, [password, new Date().toISOString(), MIGRATED_ADMIN_USER_ID]);
+    }
   }
 
   importWithAssertion(adapter, "providerConnections", data.providerConnections || [], (c) => {
     const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = c;
     adapter.run(
-      `INSERT OR REPLACE INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, provider, authType || "oauth", name || null, email || null, priority || null, isActive === false ? 0 : 1, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      `INSERT OR REPLACE INTO providerConnections(id, workspaceId, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, DEFAULT_WORKSPACE_ID, provider, authType || "oauth", name || null, email || null, priority || null, isActive === false ? 0 : 1, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
   }, (c) => ({ id: c.id ?? null, provider: c.provider ?? null, name: c.name ?? null }));
 
   importWithAssertion(adapter, "providerNodes", data.providerNodes || [], (n) => {
     const { id, type, name, createdAt, updatedAt, ...rest } = n;
     adapter.run(
-      `INSERT OR REPLACE INTO providerNodes(id, type, name, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [id, type || null, name || null, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      `INSERT OR REPLACE INTO providerNodes(id, workspaceId, type, name, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+      [id, DEFAULT_WORKSPACE_ID, type || null, name || null, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
   }, (n) => ({ id: n.id ?? null, type: n.type ?? null, name: n.name ?? null }));
 
   importWithAssertion(adapter, "proxyPools", data.proxyPools || [], (p) => {
     const { id, isActive, testStatus, createdAt, updatedAt, ...rest } = p;
     adapter.run(
-      `INSERT OR REPLACE INTO proxyPools(id, isActive, testStatus, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [id, isActive === false ? 0 : 1, testStatus || "unknown", stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
+      `INSERT OR REPLACE INTO proxyPools(id, workspaceId, isActive, testStatus, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+      [id, DEFAULT_WORKSPACE_ID, isActive === false ? 0 : 1, testStatus || "unknown", stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
     );
   }, (p) => ({ id: p.id ?? null }));
 
   importWithAssertion(adapter, "apiKeys", data.apiKeys || [], (k) => {
     adapter.run(
-      `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+      `INSERT OR REPLACE INTO apiKeys(id, workspaceId, userId, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+      [k.id, DEFAULT_WORKSPACE_ID, MIGRATED_ADMIN_USER_ID, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
     );
   }, (k) => ({ id: k.id ?? null, name: k.name ?? null }));
 
   importWithAssertion(adapter, "combos", data.combos || [], (c) => {
     adapter.run(
-      `INSERT OR REPLACE INTO combos(id, name, kind, models, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
-      [c.id, c.name, c.kind || null, stringifyJson(c.models || []), c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()]
+      `INSERT OR REPLACE INTO combos(id, workspaceId, name, kind, models, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+      [c.id, DEFAULT_WORKSPACE_ID, c.name, c.kind || null, stringifyJson(c.models || []), c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()]
     );
   }, (c) => ({ id: c.id ?? null, name: c.name ?? null }));
 
   for (const [alias, model] of Object.entries(data.modelAliases || {})) {
-    adapter.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('modelAliases', ?, ?)`, [alias, stringifyJson(model)]);
+    adapter.run(`INSERT OR REPLACE INTO workspaceKv(workspaceId, scope, key, value) VALUES(?, 'modelAliases', ?, ?)`, [DEFAULT_WORKSPACE_ID, alias, stringifyJson(model)]);
   }
   for (const m of data.customModels || []) {
     const k = `${m.providerAlias}|${m.id}|${m.type || "llm"}`;
-    adapter.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, stringifyJson(m)]);
+    adapter.run(`INSERT OR REPLACE INTO workspaceKv(workspaceId, scope, key, value) VALUES(?, 'customModels', ?, ?)`, [DEFAULT_WORKSPACE_ID, k, stringifyJson(m)]);
   }
   for (const [tool, mappings] of Object.entries(data.mitmAlias || {})) {
-    adapter.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('mitmAlias', ?, ?)`, [tool, stringifyJson(mappings || {})]);
+    adapter.run(`INSERT OR REPLACE INTO workspaceKv(workspaceId, scope, key, value) VALUES(?, 'mitmAlias', ?, ?)`, [DEFAULT_WORKSPACE_ID, tool, stringifyJson(mappings || {})]);
   }
   for (const [provider, models] of Object.entries(data.pricing || {})) {
     adapter.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [provider, stringifyJson(models || {})]);
@@ -174,8 +180,9 @@ function importLegacyUsage(adapter, data) {
   for (const e of data.history || []) {
     const t = e.tokens || {};
     adapter.run(
-      `INSERT INTO usageHistory(timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO usageHistory(workspaceId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        DEFAULT_WORKSPACE_ID,
         e.timestamp || new Date().toISOString(),
         e.provider || null, e.model || null, e.connectionId || null, e.apiKey || null, e.endpoint || null,
         t.prompt_tokens || t.input_tokens || 0,
@@ -188,17 +195,28 @@ function importLegacyUsage(adapter, data) {
     );
   }
   for (const [dateKey, day] of Object.entries(data.dailySummary || {})) {
-    adapter.run(`INSERT OR REPLACE INTO usageDaily(dateKey, data) VALUES(?, ?)`, [dateKey, stringifyJson(day)]);
+    adapter.run(
+      `INSERT OR REPLACE INTO usageDaily(workspaceId, dateKey, data) VALUES(?, ?, ?)`,
+      [DEFAULT_WORKSPACE_ID, dateKey, stringifyJson(day)]
+    );
   }
   if (typeof data.totalRequestsLifetime === "number") {
-    setMetaSync(adapter, "totalRequestsLifetime", data.totalRequestsLifetime);
+    adapter.run(
+      `INSERT INTO workspaceUsageMeta(workspaceId, totalRequestsLifetime)
+       VALUES(?, ?)
+       ON CONFLICT(workspaceId) DO UPDATE SET totalRequestsLifetime = excluded.totalRequestsLifetime`,
+      [DEFAULT_WORKSPACE_ID, data.totalRequestsLifetime]
+    );
   }
 }
 
 function importLegacyDisabled(adapter, data) {
   if (!data || typeof data.disabled !== "object") return;
   for (const [provider, ids] of Object.entries(data.disabled)) {
-    adapter.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('disabledModels', ?, ?)`, [provider, stringifyJson(ids || [])]);
+    adapter.run(
+      `INSERT OR REPLACE INTO workspaceKv(workspaceId, scope, key, value) VALUES(?, 'disabledModels', ?, ?)`,
+      [DEFAULT_WORKSPACE_ID, provider, stringifyJson(ids || [])]
+    );
   }
 }
 
@@ -206,8 +224,8 @@ function importLegacyDetails(adapter, data) {
   if (!data || !Array.isArray(data.records)) return;
   for (const r of data.records) {
     adapter.run(
-      `INSERT OR REPLACE INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-      [r.id, r.timestamp || new Date().toISOString(), r.provider || null, r.model || null, r.connectionId || null, r.status || null, stringifyJson(r)]
+      `INSERT OR REPLACE INTO requestDetails(id, workspaceId, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+      [r.id, DEFAULT_WORKSPACE_ID, r.timestamp || new Date().toISOString(), r.provider || null, r.model || null, r.connectionId || null, r.status || null, stringifyJson(r)]
     );
   }
 }

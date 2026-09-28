@@ -4,9 +4,15 @@ import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { AI_MODELS } from "@/shared/constants/config";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // GET /api/models - Get models with aliases
-export async function GET() {
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet());
+}
+
+async function handleGet() {
   try {
     const modelAliases = await getModelAliases();
     const disabled = await getDisabledModels();
@@ -37,6 +43,10 @@ export async function GET() {
 
 // PUT /api/models - Update model alias
 export async function PUT(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request));
+}
+
+async function handlePut(request) {
   try {
     const body = await request.json();
     const { model, alias } = body;

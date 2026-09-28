@@ -6,6 +6,8 @@ import { getUsageForProvider } from "open-sse/services/usage.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // Detect auth-expired messages returned by usage providers instead of throwing
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
@@ -119,7 +121,11 @@ export async function refreshAndUpdateCredentials(connection, force = false, pro
 /**
  * GET /api/usage/[connectionId] - Get usage data for a specific connection
  */
-export async function GET(request, { params }) {
+export async function GET(request, ctx) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request, ctx));
+}
+
+async function handleGet(request, { params }) {
   let connection;
   try {
     const { connectionId } = await params;

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
 import { extractCodexAccountInfo } from "@/lib/oauth/providers";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * POST /api/oauth/codex/import-token
@@ -10,6 +12,10 @@ import { extractCodexAccountInfo } from "@/lib/oauth/providers";
  * Body: { accessToken: string, name?: string }
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { accessToken, name } = await request.json();
 

@@ -15,9 +15,13 @@ beforeAll(async () => {
   vi.resetModules();
   sqliteDb = await import("@/lib/db/index.js");
   await sqliteDb.initDb();
+  const { enterWorkspaceForTest } = await import("@/lib/workspaces/requestContext.js");
+  const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
+  enterWorkspaceForTest({ workspaceId: DEFAULT_WORKSPACE_ID });
 });
 
-afterAll(() => {
+afterAll(async () => {
+  await sqliteDb?.closeDb?.();
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
@@ -214,11 +218,15 @@ describe("DB SQLite layer — public API parity", () => {
     expect(stats.byProvider.openai.promptTokens).toBeGreaterThanOrEqual(300);
   });
 
-  it("usage: pending tracking in-memory", () => {
+  it("usage: pending tracking in-memory", async () => {
     sqliteDb.trackPendingRequest("gpt-4", "openai", "c1", true);
-    expect(global._pendingRequests.byModel["gpt-4 (openai)"]).toBe(1);
+    let active = await sqliteDb.getActiveRequests();
+    expect(active.activeRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ model: "gpt-4", provider: "openai", count: 1 }),
+    ]));
     sqliteDb.trackPendingRequest("gpt-4", "openai", "c1", false);
-    expect(global._pendingRequests.byModel["gpt-4 (openai)"]).toBeUndefined();
+    active = await sqliteDb.getActiveRequests();
+    expect(active.activeRequests).toHaveLength(0);
   });
 
   it("requestDetails: save → query with paging", async () => {

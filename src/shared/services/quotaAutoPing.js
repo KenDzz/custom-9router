@@ -1,7 +1,12 @@
 // Quota auto-ping scheduler: warms 5h windows by sending tiny opt-in requests right after reset.
 import "open-sse/index.js";
 
-import { getSettings, getProviderConnections, updateProviderConnection } from "@/lib/localDb";
+import {
+  getSettings,
+  getProviderConnections,
+  getProviderConnectionsAcrossWorkspaces,
+  updateProviderConnection,
+} from "@/lib/localDb";
 import { getClaudeUsage } from "open-sse/services/usage/claude.js";
 import { getCodexUsage } from "open-sse/services/usage/codex.js";
 import { getExecutor } from "open-sse/executors/index.js";
@@ -10,6 +15,7 @@ import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { refreshAndUpdateCredentials } from "@/app/api/usage/[connectionId]/route.js";
 import { QUOTA_AUTOPING_CONFIG } from "@/shared/constants/config";
+import { runWithWorkspace } from "@/lib/workspaces/requestContext.js";
 
 const C = QUOTA_AUTOPING_CONFIG;
 const CLAUDE_PING_URL = "https://api.anthropic.com/v1/messages?beta=true";
@@ -250,6 +256,7 @@ function createDefaultDeps() {
   return {
     getSettings,
     getProviderConnections,
+    getProviderConnectionsAcrossWorkspaces,
     updateProviderConnection,
     resolveConnectionProxyConfig,
     refreshAndUpdateCredentials,
@@ -271,11 +278,18 @@ export async function runQuotaAutoPingTick(deps = createDefaultDeps(), state = g
       const enabledMap = settings?.[providerConfig.settingsKey]?.connections || {};
       if (Object.keys(enabledMap).length === 0) continue;
 
-      const conns = await deps.getProviderConnections({ provider, isActive: true });
+      const getConnections = deps.getProviderConnectionsAcrossWorkspaces || deps.getProviderConnections;
+      const conns = await getConnections({ provider, isActive: true });
       const targets = conns.filter((conn) => conn.authType === "oauth" && enabledMap[conn.id] === true);
       for (const conn of targets) {
         try {
-          await pingConnection(conn, provider, providerConfig, handler, deps, state);
+          const ping = () => pingConnection(conn, provider, providerConfig, handler, deps, state);
+          if (conn.workspaceId) {
+            await runWithWorkspace({ workspaceId: conn.workspaceId }, ping);
+          } else {
+            // Test-injected/legacy deps are already scoped by their caller.
+            await ping();
+          }
         } catch (e) {
           state.failureCache[cacheKey(provider, conn.id)] = Date.now();
           console.warn(`[AutoPing] ${provider}:${conn.id}: ${e.message}`);

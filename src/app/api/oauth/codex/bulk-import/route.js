@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
 import { extractCodexAccountInfo } from "@/lib/oauth/providers";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * POST /api/oauth/codex/bulk-import
@@ -17,6 +19,10 @@ import { extractCodexAccountInfo } from "@/lib/oauth/providers";
  * Tokens are NEVER echoed back in the response.
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   let body;
   try {
     body = await request.json();

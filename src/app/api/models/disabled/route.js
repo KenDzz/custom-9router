@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { getDisabledModels, disableModels, enableModels } from "@/lib/disabledModelsDb";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/models/disabled?providerAlias=xxx
 export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");
@@ -19,6 +25,10 @@ export async function GET(request) {
 
 // POST /api/models/disabled  body: { providerAlias, ids: [...] }
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { providerAlias, ids } = await request.json();
     if (!providerAlias || !Array.isArray(ids)) {
@@ -34,6 +44,10 @@ export async function POST(request) {
 
 // DELETE /api/models/disabled?providerAlias=xxx[&id=yyy]
 export async function DELETE(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request));
+}
+
+async function handleDelete(request) {
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");

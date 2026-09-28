@@ -4,6 +4,10 @@ vi.mock("../../src/lib/localDb.js", () => ({
   getProviderConnections: vi.fn(),
 }));
 
+vi.mock("@/lib/workspaces/requestContext.js", () => ({
+  withDashboardOrLlmWorkspace: (_request, _role, callback) => callback({ workspaceId: "test-workspace" }),
+}));
+
 import { getProviderConnections } from "../../src/lib/localDb.js";
 import { GET } from "../../src/app/api/media-providers/tts/minimax/voices/route.js";
 

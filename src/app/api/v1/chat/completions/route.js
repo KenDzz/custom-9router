@@ -1,5 +1,6 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import { initTranslators } from "open-sse/translator/index.js";
+import { withLlmWorkspace } from "@/lib/workspaces/requestContext.js";
 
 let initialized = false;
 
@@ -26,10 +27,14 @@ export async function OPTIONS() {
   });
 }
 
-export async function POST(request) {  
+export async function POST(request) {
+  return withLlmWorkspace(request, () => handlePost(request));
+}
+
+async function handlePost(request) {
   // Fallback to local handling
   await ensureInitialized();
-  
+
   return await handleChat(request);
 }
 

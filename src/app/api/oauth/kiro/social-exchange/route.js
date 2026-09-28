@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { KiroService } from "@/lib/oauth/services/kiro";
 import { createProviderConnection } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * POST /api/oauth/kiro/social-exchange
@@ -8,6 +10,10 @@ import { createProviderConnection } from "@/models";
  * Callback URL will be in format: kiro://kiro.kiroAgent/authenticate-success?code=XXX&state=YYY
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { code, codeVerifier, provider } = await request.json();
 

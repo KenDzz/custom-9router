@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/models/custom - List all custom models
-export async function GET() {
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet());
+}
+
+async function handleGet() {
   try {
     const models = await getCustomModels();
     return NextResponse.json({ models });
@@ -16,6 +22,10 @@ export async function GET() {
 
 // POST /api/models/custom - Add custom model
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { providerAlias, id, type, name } = await request.json();
     if (!providerAlias || !id) {
@@ -31,6 +41,10 @@ export async function POST(request) {
 
 // DELETE /api/models/custom?providerAlias=xxx&id=yyy&type=zzz
 export async function DELETE(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request));
+}
+
+async function handleDelete(request) {
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");

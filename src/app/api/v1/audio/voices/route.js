@@ -1,4 +1,5 @@
 import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { withLlmWorkspace } from "@/lib/workspaces/requestContext.js";
 
 // Provider → internal voices API. Edge/local-device share the generic endpoint.
 const PROVIDER_API = {
@@ -18,6 +19,10 @@ export async function OPTIONS() {
 // GET /v1/audio/voices?provider={p}[&lang=xx]
 // Returns OpenAI-style list with each voice's full model id ready for /v1/audio/speech
 export async function GET(request) {
+  return withLlmWorkspace(request, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams, origin } = new URL(request.url);
     const provider = searchParams.get("provider");
@@ -32,7 +37,12 @@ export async function GET(request) {
 
     const baseUrl = PROVIDER_API[provider](origin);
     const url = lang ? `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}lang=${encodeURIComponent(lang)}` : baseUrl;
-    const res = await fetch(url, { cache: "no-store" });
+    const forwardedHeaders = {};
+    for (const name of ["authorization", "x-api-key", "x-goog-api-key", "cookie"]) {
+      const value = request.headers.get(name);
+      if (value) forwardedHeaders[name] = value;
+    }
+    const res = await fetch(url, { cache: "no-store", headers: forwardedHeaders });
     const data = await res.json();
     if (!res.ok || data.error) {
       return Response.json(

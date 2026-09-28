@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { requireWorkspaceId } from "@/lib/workspaces/requestContext.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
@@ -16,8 +17,8 @@ async function getObservabilityConfig() {
     const { getSettings } = await import("./settingsRepo.js");
     const settings = await getSettings();
     const envEnabled = process.env.OBSERVABILITY_ENABLED !== "false";
-    const enabled = typeof settings.enableObservability2 === "boolean"
-      ? settings.enableObservability2
+    const enabled = typeof settings.enableObservability === "boolean"
+      ? settings.enableObservability
       : envEnabled;
     cachedConfig = {
       enabled,
@@ -87,6 +88,7 @@ async function flushToDatabase() {
 
           const record = {
             id: item.id,
+            workspaceId: item.workspaceId,
             provider: item.provider || null,
             model: item.model || null,
             connectionId: item.connectionId || null,
@@ -102,17 +104,36 @@ async function flushToDatabase() {
           };
 
           db.run(
-            `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, data = excluded.data`,
-            [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
+            `INSERT INTO requestDetails(id, workspaceId, timestamp, provider, model, connectionId, status, data)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               timestamp = excluded.timestamp,
+               provider = excluded.provider,
+               model = excluded.model,
+               connectionId = excluded.connectionId,
+               status = excluded.status,
+               data = excluded.data
+             WHERE requestDetails.workspaceId = excluded.workspaceId`,
+            [record.id, record.workspaceId, record.timestamp, record.provider, record.model,
+              record.connectionId, record.status, stringifyJson(record)]
           );
         }
 
-        const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
-        if (cnt && cnt.c > config.maxRecords) {
-          db.run(
-            `DELETE FROM requestDetails WHERE id IN (SELECT id FROM requestDetails ORDER BY timestamp ASC LIMIT ?)`,
-            [cnt.c - config.maxRecords]
+        const workspaceIds = [...new Set(items.map((item) => item.workspaceId))];
+        for (const workspaceId of workspaceIds) {
+          const cnt = db.get(
+            `SELECT COUNT(*) as c FROM requestDetails WHERE workspaceId = ?`,
+            [workspaceId],
           );
+          if (cnt && cnt.c > config.maxRecords) {
+            db.run(
+              `DELETE FROM requestDetails
+               WHERE workspaceId = ? AND id IN (
+                 SELECT id FROM requestDetails WHERE workspaceId = ? ORDER BY timestamp ASC LIMIT ?
+               )`,
+              [workspaceId, workspaceId, cnt.c - config.maxRecords]
+            );
+          }
         }
       });
     }
@@ -124,10 +145,12 @@ async function flushToDatabase() {
 }
 
 export async function saveRequestDetail(detail) {
+  const workspaceId = requireWorkspaceId();
+  const bufferedDetail = { ...detail, workspaceId };
   const config = await getObservabilityConfig();
   if (!config.enabled) return;
 
-  writeBuffer.push(detail);
+  writeBuffer.push(bufferedDetail);
 
   // Trigger immediate flush if batch threshold reached.
   // flushToDatabase() drains entire buffer in a loop, so all pushes during await are persisted.
@@ -143,9 +166,10 @@ export async function saveRequestDetail(detail) {
 }
 
 export async function getRequestDetails(filter = {}) {
+  const workspaceId = requireWorkspaceId();
   const db = await getAdapter();
-  const conds = [];
-  const params = [];
+  const conds = ["workspaceId = ?"];
+  const params = [workspaceId];
 
   if (filter.provider) { conds.push("provider = ?"); params.push(filter.provider); }
   if (filter.model) { conds.push("model = ?"); params.push(filter.model); }
@@ -176,14 +200,23 @@ export async function getRequestDetails(filter = {}) {
 }
 
 export async function getDistinctProviders() {
+  const workspaceId = requireWorkspaceId();
   const db = await getAdapter();
-  const rows = db.all(`SELECT DISTINCT provider FROM requestDetails WHERE provider IS NOT NULL ORDER BY provider ASC`);
+  const rows = db.all(
+    `SELECT DISTINCT provider FROM requestDetails
+     WHERE workspaceId = ? AND provider IS NOT NULL ORDER BY provider ASC`,
+    [workspaceId],
+  );
   return rows.map((r) => r.provider);
 }
 
 export async function getRequestDetailById(id) {
+  const workspaceId = requireWorkspaceId();
   const db = await getAdapter();
-  const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
+  const row = db.get(
+    `SELECT data FROM requestDetails WHERE id = ? AND workspaceId = ?`,
+    [id, workspaceId],
+  );
   return row ? parseJson(row.data, null) : null;
 }
 

@@ -23,10 +23,15 @@ const navItems = [
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
   { href: "/dashboard/combos", label: "Combos", icon: "layers" },
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
+  { href: "/dashboard/members", label: "Members", icon: "group" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
+];
+
+const memberNavItems = [
+  { href: "/dashboard/member", label: "My Dashboard", icon: "space_dashboard" },
 ];
 
 const debugItems = [
@@ -49,24 +54,48 @@ export default function Sidebar({ onClose }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [shutdownCountdown, setShutdownCountdown] = useState(0);
   const [enableTranslator, setEnableTranslator] = useState(false);
+  const [activeRole, setActiveRole] = useState(null);
   const { copied, copy } = useCopyToClipboard(2000);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
+  const isOwner = activeRole === "owner";
 
   useEffect(() => {
+    let cancelled = false;
+    fetch("/api/users/me", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return { legacyOwner: true };
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if (data.legacyOwner) {
+          setActiveRole("owner");
+          return;
+        }
+        const active = (data.workspaces || []).find((workspace) => workspace.id === data.activeWorkspaceId);
+        setActiveRole(active?.role || "member");
+      })
+      .catch(() => { if (!cancelled) setActiveRole("member"); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!isOwner) return;
     fetch("/api/settings")
       .then(res => res.json())
       .then(data => { if (data.enableTranslator) setEnableTranslator(true); })
       .catch(() => {});
-  }, []);
+  }, [isOwner]);
 
   // Lazy check for new npm version on mount
   useEffect(() => {
+    if (!isOwner) return;
     fetch("/api/version")
       .then(res => res.json())
       .then(data => { if (data.hasUpdate) setUpdateInfo(data); })
       .catch(() => {});
-  }, []);
+  }, [isOwner]);
 
   const isActive = (href) => {
     if (href === "/dashboard/endpoint") {
@@ -130,7 +159,7 @@ export default function Sidebar({ onClose }) {
               <span className="text-xs text-text-muted">v{APP_CONFIG.version}</span>
             </div>
           </Link>
-          {updateInfo && (
+          {isOwner && updateInfo && (
             <div className="flex flex-col gap-1.5 rounded p-1 -m-1">
               <span className="text-xs font-semibold text-green-600 dark:text-amber-500">
                 ↑ New version available: v{updateInfo.latestVersion}
@@ -158,7 +187,7 @@ export default function Sidebar({ onClose }) {
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">
-          {navItems.map((item) => (
+          {(isOwner ? navItems : activeRole ? memberNavItems : []).map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -183,7 +212,7 @@ export default function Sidebar({ onClose }) {
           ))}
 
           {/* System section */}
-          <div className="pt-3 mt-2 space-y-0.5">
+          {isOwner && <div className="pt-3 mt-2 space-y-0.5">
             <p className="px-4 text-xs font-semibold text-text-muted/60 uppercase tracking-wider mb-2">
               System
             </p>
@@ -326,7 +355,7 @@ export default function Sidebar({ onClose }) {
               </span>
               <span className="text-[13px] font-medium">Settings</span>
             </Link>
-          </div>
+          </div>}
         </nav>
 
       </aside>

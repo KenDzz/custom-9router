@@ -1,5 +1,6 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import { initTranslators } from "open-sse/translator/index.js";
+import { withLlmWorkspace } from "@/lib/workspaces/requestContext.js";
 
 let initialized = false;
 
@@ -25,6 +26,10 @@ export async function OPTIONS() {
  * Reuses the same handleChat pipeline, signals compact via body._compact
  */
 export async function POST(request) {
+  return withLlmWorkspace(request, () => handlePost(request));
+}
+
+async function handlePost(request) {
   await ensureInitialized();
   const body = await request.json();
   body._compact = true;

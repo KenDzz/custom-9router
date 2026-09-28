@@ -1,22 +1,30 @@
 import { NextResponse } from "next/server";
 import { getApiKeys, createApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/keys - List API keys
-export async function GET() {
-  try {
-    const keys = await getApiKeys();
-    return NextResponse.json({ keys });
-  } catch (error) {
-    console.log("Error fetching keys:", error);
-    return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 });
-  }
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, async () => {
+    try {
+      const keys = await getApiKeys();
+      return NextResponse.json({ keys });
+    } catch (error) {
+      console.log("Error fetching keys:", error);
+      return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 });
+    }
+  });
 }
 
 // POST /api/keys - Create new API key
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, ({ user }) => handlePost(request, user.id));
+}
+
+async function handlePost(request, userId) {
   try {
     const body = await request.json();
     const { name } = body;
@@ -27,7 +35,7 @@ export async function POST(request) {
 
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
-    const apiKey = await createApiKey(name, machineId);
+    const apiKey = await createApiKey(name, machineId, userId);
 
     return NextResponse.json({
       key: apiKey.key,

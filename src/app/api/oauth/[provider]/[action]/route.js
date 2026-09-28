@@ -19,10 +19,16 @@ import {
   getXaiSessionStatus,
   clearXaiSession,
 } from "@/lib/oauth/utils/server";
+import {
+  getWorkspaceContext,
+  requireWorkspaceId,
+  withDashboardWorkspace,
+} from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 async function completeXaiManualCode(code, state) {
   const session = state ? getXaiSessionStatus(state) : null;
-  if (!session) {
+  if (!session || session.workspaceId !== requireWorkspaceId()) {
     throw new Error("xAI OAuth session not found; restart the login flow and paste the code again");
   }
   if (!code) throw new Error("Missing xAI authorization code");
@@ -66,7 +72,11 @@ async function completeXaiManualCode(code, state) {
 
 // GET /api/oauth/[provider]/authorize - Generate auth URL
 // GET /api/oauth/[provider]/device-code - Request device code (for device_code flow)
-export async function GET(request, { params }) {
+export async function GET(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleGet(request, context));
+}
+
+async function handleGet(request, { params }) {
   try {
     const { provider, action } = await params;
     const { searchParams } = new URL(request.url);
@@ -97,9 +107,10 @@ export async function GET(request, { params }) {
         : await startCodexProxy(Number(appPort));
       let serverSide = false;
       if (result.success && state && codeVerifier && redirectUri) {
+        const workspaceContext = getWorkspaceContext();
         serverSide = provider === "xai"
-          ? registerXaiSession({ state, codeVerifier, redirectUri })
-          : registerCodexSession({ state, codeVerifier, redirectUri });
+          ? registerXaiSession({ state, codeVerifier, redirectUri, ...workspaceContext })
+          : registerCodexSession({ state, codeVerifier, redirectUri, ...workspaceContext });
       }
       return NextResponse.json({ ...result, serverSide });
     }
@@ -113,7 +124,9 @@ export async function GET(request, { params }) {
         return NextResponse.json({ error: "Missing state" }, { status: 400 });
       }
       const session = provider === "xai" ? getXaiSessionStatus(state) : getCodexSessionStatus(state);
-      if (!session) return NextResponse.json({ status: "unknown" });
+      if (!session || session.workspaceId !== requireWorkspaceId()) {
+        return NextResponse.json({ status: "unknown" });
+      }
       if (session.status === "done" || session.status === "error") {
         const payload = { ...session };
         if (provider === "xai") clearXaiSession(state);
@@ -185,7 +198,11 @@ export async function GET(request, { params }) {
 
 // POST /api/oauth/[provider]/exchange - Exchange code for tokens and save
 // POST /api/oauth/[provider]/poll - Poll for token (device_code flow)
-export async function POST(request, { params }) {
+export async function POST(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request, context));
+}
+
+async function handlePost(request, { params }) {
   try {
     const { provider, action } = await params;
     let body;

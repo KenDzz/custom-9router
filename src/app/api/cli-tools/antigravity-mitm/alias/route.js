@@ -4,9 +4,15 @@ import { NextResponse } from "next/server";
 import { getMitmAlias, setMitmAliasAll } from "@/models";
 import { getMitmStatus } from "@/mitm/manager";
 import { writeAliasForTool } from "@/lib/mitmAliasCache";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // GET - Get MITM aliases for a tool
 export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams } = new URL(request.url);
     const toolName = searchParams.get("tool");
@@ -20,6 +26,10 @@ export async function GET(request) {
 
 // PUT - Save MITM aliases for a specific tool
 export async function PUT(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request));
+}
+
+async function handlePut(request) {
   try {
     const { tool, mappings } = await request.json();
 

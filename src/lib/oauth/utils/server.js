@@ -1,6 +1,7 @@
 import http from "http";
 import { URL } from "url";
 import { CODEX_CONFIG } from "../constants/oauth.js";
+import { runWithWorkspace } from "@/lib/workspaces/requestContext.js";
 
 /**
  * Start a local HTTP server to receive OAuth callback
@@ -125,15 +126,32 @@ const CODEX_PORT = CODEX_CONFIG.fixedPort;
 // Pending exchange sessions keyed by state — used by server-side exchange mode
 const pendingExchanges = new Map();
 
+async function runInOAuthWorkspace(session, callback) {
+  const [{ getMember }, { hasWorkspaceRole, WORKSPACE_ROLES }] = await Promise.all([
+    import("@/lib/db/repos/workspacesRepo.js"),
+    import("@/lib/workspaces/constants.js"),
+  ]);
+  const member = await getMember(session.workspaceId, session.userId);
+  if (!member || !hasWorkspaceRole(member.role, WORKSPACE_ROLES.ADMIN)) {
+    throw new Error("OAuth workspace membership is no longer authorized");
+  }
+  return runWithWorkspace(
+    { workspaceId: session.workspaceId, userId: session.userId },
+    callback,
+  );
+}
+
 /**
  * Register a pending exchange session for server-side mode.
  * Modal client calls this before opening popup.
  */
-export function registerCodexSession({ state, codeVerifier, redirectUri }) {
-  if (!state || !codeVerifier || !redirectUri) return false;
+export function registerCodexSession({ state, codeVerifier, redirectUri, workspaceId, userId }) {
+  if (!state || !codeVerifier || !redirectUri || !workspaceId || !userId) return false;
   pendingExchanges.set(state, {
     codeVerifier,
     redirectUri,
+    workspaceId,
+    userId,
     status: "pending",
     createdAt: Date.now(),
   });
@@ -221,15 +239,18 @@ export function startCodexProxy(appPort) {
             session.codeVerifier,
             state
           );
-          const connection = await createProviderConnection({
-            provider: "codex",
-            authType: "oauth",
-            ...tokenData,
-            expiresAt: tokenData.expiresIn
-              ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
-              : null,
-            testStatus: "active",
-          });
+          const connection = await runInOAuthWorkspace(
+            session,
+            () => createProviderConnection({
+              provider: "codex",
+              authType: "oauth",
+              ...tokenData,
+              expiresAt: tokenData.expiresIn
+                ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+                : null,
+              testStatus: "active",
+            }),
+          );
 
           session.status = "done";
           session.connectionId = connection.id;
@@ -297,11 +318,13 @@ const XAI_PROXY_TIMEOUT_MS = 300000; // 5 minutes
 const XAI_PROXY_PORT = 56121;
 const xaiPendingExchanges = new Map();
 
-export function registerXaiSession({ state, codeVerifier, redirectUri }) {
-  if (!state || !codeVerifier || !redirectUri) return false;
+export function registerXaiSession({ state, codeVerifier, redirectUri, workspaceId, userId }) {
+  if (!state || !codeVerifier || !redirectUri || !workspaceId || !userId) return false;
   xaiPendingExchanges.set(state, {
     codeVerifier,
     redirectUri,
+    workspaceId,
+    userId,
     status: "pending",
     createdAt: Date.now(),
   });
@@ -363,15 +386,18 @@ export function startXaiProxy(appPort) {
             session.codeVerifier,
             state
           );
-          const connection = await createProviderConnection({
-            provider: "xai",
-            authType: "oauth",
-            ...tokenData,
-            expiresAt: tokenData.expiresIn
-              ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
-              : null,
-            testStatus: "active",
-          });
+          const connection = await runInOAuthWorkspace(
+            session,
+            () => createProviderConnection({
+              provider: "xai",
+              authType: "oauth",
+              ...tokenData,
+              expiresAt: tokenData.expiresIn
+                ? new Date(Date.now() + tokenData.expiresIn * 1000).toISOString()
+                : null,
+              testStatus: "active",
+            }),
+          );
 
           session.status = "done";
           session.connectionId = connection.id;

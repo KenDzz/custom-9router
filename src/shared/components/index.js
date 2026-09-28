@@ -12,6 +12,7 @@ export { default as ThemeToggle } from "./ThemeToggle";
 export { ThemeProvider } from "./ThemeProvider";
 export { default as Sidebar } from "./Sidebar";
 export { default as Header } from "./Header";
+export { default as WorkspaceSwitcher } from "./WorkspaceSwitcher";
 export { default as Footer } from "./Footer";
 export { default as OAuthModal } from "./OAuthModal";
 export { default as ModelSelectModal } from "./ModelSelectModal";

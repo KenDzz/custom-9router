@@ -15,6 +15,8 @@ import {
 } from "@/lib/tunnel";
 import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync } from "@/mitm/manager";
 import { syncToJson as syncMitmAliasCache } from "@/lib/mitmAliasCache";
+import { runWithWorkspace } from "@/lib/workspaces/requestContext.js";
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants.js";
 import { killAllBridges } from "@/lib/mcp/stdioSseBridge";
 
 // Inject correct paths and DB hooks into manager.js (CJS) from ESM context
@@ -101,8 +103,10 @@ async function runHeavyStartup() {
 
   if (settings.mitmEnabled) {
     // Sync mitmAlias DB → JSON cache so standalone MITM server can read it.
-    syncMitmAliasCache().catch(() => {});
-    autoStartMitm(settings);
+    runWithWorkspace({ workspaceId: DEFAULT_WORKSPACE_ID }, () => {
+      syncMitmAliasCache().catch(() => {});
+      return autoStartMitm(settings);
+    });
   }
 
   configureTunnelMonitoring(settings);

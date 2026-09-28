@@ -1,6 +1,7 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import { initTranslators } from "open-sse/translator/index.js";
 import { transformToOllama } from "open-sse/utils/ollamaTransform.js";
+import { withLlmWorkspace } from "@/lib/workspaces/requestContext.js";
 
 let initialized = false;
 
@@ -22,8 +23,12 @@ export async function OPTIONS() {
 }
 
 export async function POST(request) {
+  return withLlmWorkspace(request, () => handlePost(request));
+}
+
+async function handlePost(request) {
   await ensureInitialized();
-  
+
   const clonedReq = request.clone();
   let modelName = "llama3.2";
   try {

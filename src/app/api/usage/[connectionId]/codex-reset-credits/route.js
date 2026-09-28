@@ -5,6 +5,8 @@ import { getProviderConnectionById } from "@/lib/localDb";
 import { consumeCodexRateLimitResetCredit, getCodexRateLimitResetCredits } from "open-sse/services/usage.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { refreshAndUpdateCredentials } from "../route.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
 
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
 
@@ -85,72 +87,76 @@ async function refreshCodexConnection(connection, proxyOptions) {
   }
 }
 
-export async function GET(_request, { params }) {
-  let connection;
-  try {
-    const { connectionId } = await params;
-    const resolved = await getCodexConnection(connectionId);
-    if (resolved.response) return resolved.response;
-    ({ connection } = resolved);
-    const { isOAuth, proxyOptions } = resolved;
-
-    if (isOAuth) {
-      const refreshed = await refreshCodexConnection(connection, proxyOptions);
-      if (refreshed.response) return refreshed.response;
-      connection = refreshed.connection;
-    }
-
-    let result;
+export async function GET(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, async () => {
+    let connection;
     try {
-      result = await getCodexRateLimitResetCredits(connection.accessToken, proxyOptions, connection.providerSpecificData);
-    } catch (fetchError) {
-      if (!isOAuth || !connection.refreshToken || !isAuthExpiredError(fetchError)) throw fetchError;
-      const retryResult = await refreshAndUpdateCredentials(connection, true, proxyOptions);
-      connection = retryResult.connection;
-      result = await getCodexRateLimitResetCredits(connection.accessToken, proxyOptions, connection.providerSpecificData);
-    }
+      const { connectionId } = await params;
+      const resolved = await getCodexConnection(connectionId);
+      if (resolved.response) return resolved.response;
+      ({ connection } = resolved);
+      const { isOAuth, proxyOptions } = resolved;
 
-    return Response.json(result);
-  } catch (error) {
-    const provider = connection?.provider ?? "unknown";
-    console.warn(`[Codex Reset Credits] ${provider}: ${error.message}`);
-    return Response.json({ error: error.message }, { status: 500 });
-  }
+      if (isOAuth) {
+        const refreshed = await refreshCodexConnection(connection, proxyOptions);
+        if (refreshed.response) return refreshed.response;
+        connection = refreshed.connection;
+      }
+
+      let result;
+      try {
+        result = await getCodexRateLimitResetCredits(connection.accessToken, proxyOptions, connection.providerSpecificData);
+      } catch (fetchError) {
+        if (!isOAuth || !connection.refreshToken || !isAuthExpiredError(fetchError)) throw fetchError;
+        const retryResult = await refreshAndUpdateCredentials(connection, true, proxyOptions);
+        connection = retryResult.connection;
+        result = await getCodexRateLimitResetCredits(connection.accessToken, proxyOptions, connection.providerSpecificData);
+      }
+
+      return Response.json(result);
+    } catch (error) {
+      const provider = connection?.provider ?? "unknown";
+      console.warn(`[Codex Reset Credits] ${provider}: ${error.message}`);
+      return Response.json({ error: error.message }, { status: 500 });
+    }
+  });
 }
 
 export async function POST(request, { params }) {
-  let connection;
-  try {
-    const { connectionId } = await params;
-    const resolved = await getCodexConnection(connectionId);
-    if (resolved.response) return resolved.response;
-    ({ connection } = resolved);
-    const { isOAuth, proxyOptions } = resolved;
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, async () => {
+    let connection;
+    try {
+      const { connectionId } = await params;
+      const resolved = await getCodexConnection(connectionId);
+      if (resolved.response) return resolved.response;
+      ({ connection } = resolved);
+      const { isOAuth, proxyOptions } = resolved;
 
-    if (isOAuth) {
-      const refreshed = await refreshCodexConnection(connection, proxyOptions);
-      if (refreshed.response) return refreshed.response;
-      connection = refreshed.connection;
-    }
-
-    // Server-generated redeem id prevents client-controlled replay
-    const redeemRequestId = crypto.randomUUID();
-    let consumeResult = await consumeCodexRateLimitResetCredit(connection.accessToken, redeemRequestId, proxyOptions);
-
-    if (isOAuth && isAuthExpiredResult(consumeResult) && connection.refreshToken) {
-      try {
-        const retryResult = await refreshAndUpdateCredentials(connection, true, proxyOptions);
-        connection = retryResult.connection;
-        consumeResult = await consumeCodexRateLimitResetCredit(connection.accessToken, redeemRequestId, proxyOptions);
-      } catch (retryError) {
-        console.warn(`[Codex Reset Credits] force refresh failed: ${retryError.message}`);
+      if (isOAuth) {
+        const refreshed = await refreshCodexConnection(connection, proxyOptions);
+        if (refreshed.response) return refreshed.response;
+        connection = refreshed.connection;
       }
-    }
 
-    return getResponseForConsumeResult(consumeResult, redeemRequestId);
-  } catch (error) {
-    const provider = connection?.provider ?? "unknown";
-    console.warn(`[Codex Reset Credits] ${provider}: ${error.message}`);
-    return Response.json({ error: error.message }, { status: 500 });
-  }
+      // Server-generated redeem id prevents client-controlled replay
+      const redeemRequestId = crypto.randomUUID();
+      let consumeResult = await consumeCodexRateLimitResetCredit(connection.accessToken, redeemRequestId, proxyOptions);
+
+      if (isOAuth && isAuthExpiredResult(consumeResult) && connection.refreshToken) {
+        try {
+          const retryResult = await refreshAndUpdateCredentials(connection, true, proxyOptions);
+          connection = retryResult.connection;
+          consumeResult = await consumeCodexRateLimitResetCredit(connection.accessToken, redeemRequestId, proxyOptions);
+        } catch (retryError) {
+          console.warn(`[Codex Reset Credits] force refresh failed: ${retryError.message}`);
+        }
+      }
+
+      return getResponseForConsumeResult(consumeResult, redeemRequestId);
+    } catch (error) {
+      const provider = connection?.provider ?? "unknown";
+      console.warn(`[Codex Reset Credits] ${provider}: ${error.message}`);
+      return Response.json({ error: error.message }, { status: 500 });
+    }
+  });
 }

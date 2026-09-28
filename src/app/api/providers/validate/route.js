@@ -5,6 +5,8 @@ import { getDefaultModel } from "open-sse/config/providerModels.js";
 import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";
 import { openaiToCommandCodeRequest } from "open-sse/translator/request/openai-to-commandcode.js";
 import { normalizeProviderId } from "@/lib/providerNormalization";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
 // Returns true if API key is accepted (status !== 401 && !== 403).
@@ -82,6 +84,10 @@ async function probeMediaProvider(provider, apiKey) {
 
 // POST /api/providers/validate - Validate API key with provider
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const body = await request.json();
     const provider = normalizeProviderId(body.provider);

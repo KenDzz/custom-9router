@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { getDashboardAuthSession, verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { isMemberApiAllowed, isMemberPageAllowed } from "@/lib/workspaces/memberPolicy.js";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -27,9 +28,15 @@ const PUBLIC_API_PATHS = [
   "/api/auth/logout",
   "/api/auth/status",
   "/api/auth/oidc",
+  "/api/auth/invite/accept",
   "/api/version",
   "/api/settings/require-login",
 ];
+
+// Workspace/member management always requires a real dashboard JWT — never
+// bypassed by requireLogin=false (local convenience) or the CLI token (no
+// user identity to attribute an RBAC action to). See docs/CUSTOM_HOOKS.md.
+const WORKSPACE_PROTECTED_PATHS = ["/api/workspaces", "/api/users/me", "/api/auth/workspace", "/api/member"];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
 const PUBLIC_PREFIXES = ["/v1", "/v1beta", "/api/v1", "/api/v1beta", "/codex"];
@@ -117,7 +124,7 @@ function isPublicLlmApi(pathname) {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-function extractApiKey(request) {
+export function extractApiKey(request) {
   const authHeader = request.headers.get("Authorization");
   if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
   const apiKeyHeader = request.headers.get("x-api-key");
@@ -149,6 +156,20 @@ async function canAccessLocalOnlyRoute(request) {
 async function hasValidToken(request) {
   const token = request.cookies.get("auth_token")?.value;
   return await verifyDashboardAuthToken(token);
+}
+
+async function getActiveMembership(request) {
+  const token = request.cookies.get("auth_token")?.value;
+  const session = token ? await getDashboardAuthSession(token) : null;
+  if (!session) return null;
+  const [{ getMember }, { getUserById }] = await Promise.all([
+    import("@/lib/db/repos/workspacesRepo.js"),
+    import("@/lib/db/repos/usersRepo.js"),
+  ]);
+  const user = session.userId ? await getUserById(session.userId) : null;
+  if (!user?.isActive) return { role: "inactive" };
+  const member = session.activeWorkspaceId ? await getMember(session.activeWorkspaceId, session.userId) : null;
+  return member || { role: "member" };
 }
 
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
@@ -183,6 +204,24 @@ export const __test__ = {
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
 
+  // Check the member policy before any CLI/local/always-protected bypass.
+  // Public auth endpoints and LLM key authentication retain their own rules.
+  const alwaysProtected = ALWAYS_PROTECTED.some((p) => pathname.startsWith(p));
+  const dashboardApi = pathname.startsWith("/api/")
+    && !isPublicLlmApi(pathname) && (!isPublicApi(pathname) || alwaysProtected);
+  const membership = (dashboardApi || pathname.startsWith("/dashboard"))
+    ? await getActiveMembership(request)
+    : null;
+  if (membership?.role === "inactive") {
+    return dashboardApi
+      ? NextResponse.json({ error: "Account inactive" }, { status: 401 })
+      : NextResponse.redirect(new URL("/login", request.url));
+  }
+  if (dashboardApi && membership && membership.role !== "owner"
+    && !isMemberApiAllowed(pathname, request.method)) {
+    return NextResponse.json({ error: "Owner access required" }, { status: 403 });
+  }
+
   // Local-only gate for spawn-capable / host-secret routes.
   if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
     if (!(await canAccessLocalOnlyRoute(request))) {
@@ -195,6 +234,15 @@ export async function proxy(request) {
     if (await hasValidCliToken(request) || await hasValidToken(request))
       return NextResponse.next();
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Workspace/member/invite management: real dashboard JWT only. Never bypassed
+  // by requireLogin=false or the CLI token — RBAC actions need a real user
+  // identity, and detailed role checks happen in the route handlers.
+  if (WORKSPACE_PROTECTED_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    if (!(await hasValidToken(request))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
   }
 
   if (isPublicLlmApi(pathname)) {
@@ -233,6 +281,11 @@ export async function proxy(request) {
       }
     } catch {
       // On error, keep defaults (require login, block tunnel)
+    }
+
+    // Signed-in members keep their restricted surface even in local no-login mode.
+    if (membership && membership.role !== "owner" && !isMemberPageAllowed(pathname)) {
+      return NextResponse.redirect(new URL("/dashboard/member", request.url));
     }
 
     // If login not required, allow through

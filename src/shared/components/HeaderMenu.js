@@ -33,7 +33,7 @@ MenuItem.propTypes = {
   danger: PropTypes.bool,
 };
 
-export default function HeaderMenu({ onLogout }) {
+export default function HeaderMenu({ onLogout, canManageSystem = true }) {
   const [isOpen, setIsOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [shutdownOpen, setShutdownOpen] = useState(false);
@@ -89,12 +89,12 @@ export default function HeaderMenu({ onLogout }) {
               label="Theme"
               onClick={() => { toggleTheme(); close(); }}
             />
-            <MenuItem
+            {canManageSystem && <MenuItem
               icon="power_settings_new"
               label="Shutdown"
               danger
               onClick={() => { close(); setShutdownOpen(true); }}
-            />
+            />}
             <MenuItem
               icon="logout"
               label="Logout"
@@ -123,4 +123,5 @@ export default function HeaderMenu({ onLogout }) {
 
 HeaderMenu.propTypes = {
   onLogout: PropTypes.func.isRequired,
+  canManageSystem: PropTypes.bool,
 };

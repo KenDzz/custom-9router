@@ -24,6 +24,10 @@ vi.mock("@/lib/localDb", () => ({
   getSettings: mocks.getSettings,
 }));
 
+vi.mock("@/lib/workspaces/requestContext.js", () => ({
+  withLlmWorkspace: (_request, callback) => callback({ workspaceId: "test-workspace" }),
+}));
+
 const { GET } = await import("../../src/app/api/v1beta/models/route.js");
 const { POST } = await import("../../src/app/api/v1beta/models/[...path]/route.js");
 

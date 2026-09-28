@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getProxyPoolById, updateProxyPool } from "@/models";
 import { testProxyUrl } from "@/lib/network/proxyTest";
 import { fetch as undiciFetch } from "undici";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 async function testVercelRelay(relayUrl, timeoutMs = 10000) {
   const controller = new AbortController();
@@ -34,7 +36,11 @@ async function testVercelRelay(relayUrl, timeoutMs = 10000) {
 }
 
 // POST /api/proxy-pools/[id]/test - Test proxy pool entry
-export async function POST(request, { params }) {
+export async function POST(request, ctx) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request, ctx));
+}
+
+async function handlePost(request, { params }) {
   try {
     const { id } = await params;
     const proxyPool = await getProxyPoolById(id);

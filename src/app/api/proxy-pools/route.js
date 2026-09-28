@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createProxyPool, getProviderConnections, getProxyPools } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 function toBoolean(value) {
   if (value === "true") return true;
@@ -43,6 +45,10 @@ function buildUsageMap(connections = []) {
 
 // GET /api/proxy-pools - List proxy pools
 export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams } = new URL(request.url);
     const isActive = toBoolean(searchParams.get("isActive"));
@@ -76,6 +82,10 @@ export async function GET(request) {
 
 // POST /api/proxy-pools - Create proxy pool
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const body = await request.json();
     const normalized = normalizeProxyPoolInput(body);

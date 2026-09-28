@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCombos, createCombo, getComboByName } from "@/lib/localDb";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +9,11 @@ export const dynamic = "force-dynamic";
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 
 // GET /api/combos - Get all combos
-export async function GET() {
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet());
+}
+
+async function handleGet() {
   try {
     const combos = await getCombos();
     return NextResponse.json({ combos });
@@ -19,6 +25,10 @@ export async function GET() {
 
 // POST /api/combos - Create new combo
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const body = await request.json();
     const { name, models, kind } = body;

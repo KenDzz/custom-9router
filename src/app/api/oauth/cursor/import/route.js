@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { CursorService } from "@/lib/oauth/services/cursor";
 import { createProviderConnection } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * POST /api/oauth/cursor/import
@@ -11,6 +13,10 @@ import { createProviderConnection } from "@/models";
  * - machineId: string - Machine ID from storage.serviceMachineId
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { accessToken, machineId } = await request.json();
 

@@ -15,6 +15,13 @@ vi.mock("@/shared/utils/machineId", () => ({
   getConsistentMachineId: mocks.getConsistentMachineId,
 }));
 
+vi.mock("@/lib/workspaces/requestContext.js", () => ({
+  withDashboardWorkspace: (_request, _role, callback) => callback({
+    user: { id: "test-user" },
+    member: { role: "admin" },
+  }),
+}));
+
 vi.mock("next/server", () => ({
   NextResponse: {
     json(body, init = {}) {

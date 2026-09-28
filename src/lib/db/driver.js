@@ -1,8 +1,9 @@
 import { ensureDirs, DATA_FILE } from "./paths.js";
 
-// Use global to survive Next.js dev hot-reload (module state resets on reload)
-if (!global._dbAdapter) global._dbAdapter = { instance: null, initPromise: null, logged: false };
-const state = global._dbAdapter;
+// Use global to survive Next.js dev hot-reload (module state resets on reload).
+// Reuse the container object across resets; replacing it would strand an open
+// adapter behind old module closures.
+const state = global._dbAdapter ||= { instance: null, initPromise: null, logged: false };
 
 async function tryBunSqlite() {
   // Bun runtime only — built-in, no install needed
@@ -82,4 +83,15 @@ export async function getAdapter() {
 export function getAdapterSync() {
   if (!state.instance) throw new Error("[DB] adapter not initialized — await getAdapter() first");
   return state.instance;
+}
+
+export async function closeAdapter() {
+  let adapter = state.instance;
+  if (!adapter && state.initPromise) {
+    try { adapter = await state.initPromise; } catch {}
+  }
+  state.instance = null;
+  state.initPromise = null;
+  state.logged = false;
+  adapter?.close?.();
 }

@@ -2,21 +2,24 @@ import { NextResponse } from "next/server";
 import { exportDb, getSettings, importDb } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { verifyDashboardPassword } from "@/lib/auth/dashboardSession";
+import { requireDefaultOwner } from "@/lib/auth/workspaceAuth.js";
+import { runWithWorkspace } from "@/lib/workspaces/requestContext.js";
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants.js";
 
-const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const PASSWORD_HEADER = "x-9r-password";
 
-// CLI token requests are already trusted (local machine); skip password re-auth.
-function isCliRequest(request) {
-  return Boolean(request.headers.get(CLI_TOKEN_HEADER));
-}
-
 export async function GET(request) {
+  const { user, error } = await requireDefaultOwner(request);
+  if (error) return error;
+
   try {
-    if (!isCliRequest(request) && !(await verifyDashboardPassword(request.headers.get(PASSWORD_HEADER)))) {
+    if (!(await verifyDashboardPassword(request.headers.get(PASSWORD_HEADER), user.id))) {
       return NextResponse.json({ error: "Invalid password" }, { status: 401 });
     }
-    const payload = await exportDb();
+    const payload = await runWithWorkspace(
+      { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id },
+      () => exportDb({ includeGlobal: true }),
+    );
     return NextResponse.json(payload);
   } catch (error) {
     console.log("Error exporting database:", error);
@@ -25,12 +28,18 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  const { user, error } = await requireDefaultOwner(request);
+  if (error) return error;
+
   try {
     const { password, ...payload } = await request.json();
-    if (!isCliRequest(request) && !(await verifyDashboardPassword(password))) {
+    if (!(await verifyDashboardPassword(password, user.id))) {
       return NextResponse.json({ error: "Invalid password" }, { status: 401 });
     }
-    await importDb(payload);
+    await runWithWorkspace(
+      { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id },
+      () => importDb(payload, { includeGlobal: true }),
+    );
 
     // Ensure proxy settings take effect immediately after a DB import.
     try {

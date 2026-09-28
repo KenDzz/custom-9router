@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request, { params }));
+}
+
+async function handlePut(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
@@ -82,6 +88,10 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/provider-nodes/[id] - Delete provider node and its connections
 export async function DELETE(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request, { params }));
+}
+
+async function handleDelete(request, { params }) {
   try {
     const { id } = await params;
     const node = await getProviderNodeById(id);

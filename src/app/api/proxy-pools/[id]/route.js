@@ -5,6 +5,8 @@ import {
   getProxyPoolById,
   updateProxyPool,
 } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 function normalizeProxyPoolUpdate(body = {}) {
   const updates = {};
@@ -50,7 +52,11 @@ function countBoundConnections(connections = [], proxyPoolId) {
 }
 
 // GET /api/proxy-pools/[id] - Get proxy pool
-export async function GET(request, { params }) {
+export async function GET(request, ctx) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request, ctx));
+}
+
+async function handleGet(request, { params }) {
   try {
     const { id } = await params;
     const proxyPool = await getProxyPoolById(id);
@@ -67,7 +73,11 @@ export async function GET(request, { params }) {
 }
 
 // PUT /api/proxy-pools/[id] - Update proxy pool
-export async function PUT(request, { params }) {
+export async function PUT(request, ctx) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request, ctx));
+}
+
+async function handlePut(request, { params }) {
   try {
     const { id } = await params;
     const existing = await getProxyPoolById(id);
@@ -92,7 +102,11 @@ export async function PUT(request, { params }) {
 }
 
 // DELETE /api/proxy-pools/[id] - Delete proxy pool
-export async function DELETE(request, { params }) {
+export async function DELETE(request, ctx) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request, ctx));
+}
+
+async function handleDelete(request, { params }) {
   try {
     const { id } = await params;
     const existing = await getProxyPoolById(id);

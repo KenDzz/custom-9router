@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { requireWorkspaceId } from "@/lib/workspaces/requestContext.js";
 
 function rowToNode(row) {
   if (!row) return null;
@@ -27,33 +28,34 @@ function nodeToRow(n) {
   };
 }
 
-function upsert(db, n) {
+function upsert(db, n, workspaceId) {
   const r = nodeToRow(n);
   db.run(
-    `INSERT INTO providerNodes(id, type, name, data, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?)
+    `INSERT INTO providerNodes(id, workspaceId, type, name, data, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        type=excluded.type, name=excluded.name, data=excluded.data, updatedAt=excluded.updatedAt`,
-    [r.id, r.type, r.name, r.data, r.createdAt, r.updatedAt]
+    [r.id, workspaceId, r.type, r.name, r.data, r.createdAt, r.updatedAt]
   );
 }
 
 export async function getProviderNodes(filter = {}) {
   const db = await getAdapter();
-  const where = [];
-  const params = [];
+  const where = ["workspaceId = ?"];
+  const params = [requireWorkspaceId()];
   if (filter.type) { where.push("type = ?"); params.push(filter.type); }
-  const sql = `SELECT * FROM providerNodes${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
+  const sql = `SELECT * FROM providerNodes WHERE ${where.join(" AND ")}`;
   return db.all(sql, params).map(rowToNode);
 }
 
 export async function getProviderNodeById(id) {
   const db = await getAdapter();
-  return rowToNode(db.get(`SELECT * FROM providerNodes WHERE id = ?`, [id]));
+  return rowToNode(db.get(`SELECT * FROM providerNodes WHERE id = ? AND workspaceId = ?`, [id, requireWorkspaceId()]));
 }
 
 export async function createProviderNode(data) {
   const db = await getAdapter();
+  const workspaceId = requireWorkspaceId();
   const now = new Date().toISOString();
   const node = {
     id: data.id || uuidv4(),
@@ -65,18 +67,19 @@ export async function createProviderNode(data) {
     createdAt: now,
     updatedAt: now,
   };
-  upsert(db, node);
+  upsert(db, node, workspaceId);
   return node;
 }
 
 export async function updateProviderNode(id, data) {
   const db = await getAdapter();
+  const workspaceId = requireWorkspaceId();
   let result = null;
   db.transaction(() => {
-    const row = db.get(`SELECT * FROM providerNodes WHERE id = ?`, [id]);
+    const row = db.get(`SELECT * FROM providerNodes WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
     if (!row) return;
     const merged = { ...rowToNode(row), ...data, updatedAt: new Date().toISOString() };
-    upsert(db, merged);
+    upsert(db, merged, workspaceId);
     result = merged;
   });
   return result;
@@ -84,12 +87,13 @@ export async function updateProviderNode(id, data) {
 
 export async function deleteProviderNode(id) {
   const db = await getAdapter();
+  const workspaceId = requireWorkspaceId();
   let removed = null;
   db.transaction(() => {
-    const row = db.get(`SELECT * FROM providerNodes WHERE id = ?`, [id]);
+    const row = db.get(`SELECT * FROM providerNodes WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
     if (!row) return;
     removed = rowToNode(row);
-    db.run(`DELETE FROM providerNodes WHERE id = ?`, [id]);
+    db.run(`DELETE FROM providerNodes WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
   });
   return removed;
 }

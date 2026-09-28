@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 const GITLAB_DEFAULT_BASE = "https://gitlab.com";
 
@@ -8,6 +10,10 @@ const GITLAB_DEFAULT_BASE = "https://gitlab.com";
  * Authenticate GitLab Duo with a Personal Access Token (PAT)
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     let body;
     try {

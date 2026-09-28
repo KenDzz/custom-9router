@@ -1,4 +1,5 @@
 import { handleVideoCreate } from "@/sse/handlers/videoGeneration.js";
+import { withLlmWorkspace } from "@/lib/workspaces/requestContext.js";
 
 export async function OPTIONS() {
   return new Response(null, {
@@ -12,5 +13,9 @@ export async function OPTIONS() {
 
 /** POST /v1/videos/generations - async video generation (xAI Grok Imagine) */
 export async function POST(request) {
+  return withLlmWorkspace(request, () => handlePost(request));
+}
+
+async function handlePost(request) {
   return await handleVideoCreate(request, "generations");
 }

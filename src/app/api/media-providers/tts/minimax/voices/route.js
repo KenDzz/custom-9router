@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/localDb";
+import { withDashboardOrLlmWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 const MINIMAX_VOICE_ENDPOINTS = {
   minimax: "https://api.minimax.io/v1/get_voice",
@@ -63,6 +65,10 @@ function normalizeMiniMaxVoices(data) {
  * Returns { languages, byLang } grouped for the shared TTS voice picker.
  */
 export async function GET(request) {
+  return withDashboardOrLlmWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider") === "minimax-cn" ? "minimax-cn" : "minimax";

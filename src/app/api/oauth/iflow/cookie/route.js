@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createProviderConnection } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * iFlow Cookie-Based Authentication
@@ -7,6 +9,10 @@ import { createProviderConnection } from "@/models";
  * Body: { cookie: "BXAuth=xxx; ..." }
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { cookie } = await request.json();
 

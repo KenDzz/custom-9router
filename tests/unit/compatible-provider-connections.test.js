@@ -19,20 +19,41 @@ async function setupTestContext(nodeData) {
       },
     },
   }));
+  // This test exercises provider-creation logic, not dashboard auth/RBAC —
+  // bypass withDashboardWorkspace's real user/membership lookup and instead
+  // re-establish the Default workspace context via a proper als.run()
+  // boundary right at the call. Every direct repo call this file makes
+  // (createProviderNode seed, getProviderConnections assertions) is wrapped
+  // the same way below — an ambient enterWith() context does not reliably
+  // survive a Response/JSON await boundary, so nothing here relies on one.
+  vi.doMock("@/lib/workspaces/requestContext.js", async (importOriginal) => {
+    const actual = await importOriginal();
+    const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
+    return {
+      ...actual,
+      withDashboardWorkspace: (request, minimumRole, callback) =>
+        actual.runWithWorkspace({ workspaceId: DEFAULT_WORKSPACE_ID }, () => callback({})),
+    };
+  });
 
   const { POST } = await import("@/app/api/providers/route.js");
   const {
     createProviderNode,
     getProviderConnections,
   } = await import("@/models/index.js");
+  const { runWithWorkspace } = await import("@/lib/workspaces/requestContext.js");
+  const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
+  const { closeDb } = await import("@/lib/db/index.js");
+  const withWorkspace = (fn) => runWithWorkspace({ workspaceId: DEFAULT_WORKSPACE_ID }, fn);
 
-  const node = await createProviderNode(nodeData);
+  const node = await withWorkspace(() => createProviderNode(nodeData));
 
   return {
     node,
     POST,
-    getProviderConnections,
-    cleanup() {
+    getProviderConnections: (filter) => withWorkspace(() => getProviderConnections(filter)),
+    async cleanup() {
+      await closeDb();
       fs.rmSync(tempDir, { recursive: true, force: true });
     },
   };
@@ -73,11 +94,12 @@ describe("compatible provider connections API", () => {
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await cleanup();
     vi.doUnmock("next/server");
+    vi.doUnmock("@/lib/workspaces/requestContext.js");
     vi.resetModules();
     vi.clearAllMocks();
-    cleanup();
     cleanup = () => {};
     if (originalDataDir === undefined) delete process.env.DATA_DIR;
     else process.env.DATA_DIR = originalDataDir;

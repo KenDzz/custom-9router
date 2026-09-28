@@ -1,12 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
-import bcrypt from "bcryptjs";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { DATA_DIR } from "@/lib/dataDir";
-import { getSettings } from "@/lib/localDb";
-
-const DEFAULT_PASSWORD = "123456";
 
 function loadJwtSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
@@ -29,6 +25,9 @@ export function shouldUseSecureCookie(request) {
   return forceSecureCookie || isHttpsRequest;
 }
 
+// claims may carry { sub, userId, activeWorkspaceId, loginMethod } — workspace
+// identity riding alongside the existing `authenticated` flag. Callers that
+// don't pass them (legacy call sites) keep working unchanged.
 export async function createDashboardAuthToken(claims = {}) {
   return new SignJWT({ authenticated: true, ...claims })
     .setProtectedHeader({ alg: "HS256" })
@@ -71,12 +70,10 @@ export function clearDashboardAuthCookie(cookieStore) {
   cookieStore.delete("auth_token");
 }
 
-// Verify the current dashboard password (re-auth for sensitive actions).
-export async function verifyDashboardPassword(password) {
-  if (typeof password !== "string" || !password) return false;
-  const settings = await getSettings();
-  const storedHash = settings?.password;
-  if (storedHash) return bcrypt.compare(password, storedHash);
-  const initialPassword = process.env.INITIAL_PASSWORD || DEFAULT_PASSWORD;
-  return password === initialPassword;
+// Verify one user's password for sensitive actions. Callers must pass the
+// authenticated user id; global settings no longer own a password hash.
+export async function verifyDashboardPassword(password, userId) {
+  if (typeof password !== "string" || !password || !userId) return false;
+  const { getUserById, verifyPassword } = await import("@/lib/db/repos/usersRepo.js");
+  return verifyPassword(await getUserById(userId), password);
 }

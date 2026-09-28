@@ -5,8 +5,14 @@ import { FORMATS } from "open-sse/translator/formats.js";
 import { getModelInfo } from "@/sse/services/model.js";
 import { getProviderConnections } from "@/lib/localDb.js";
 import { getExecutor } from "open-sse/executors/index.js";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { step, body } = await request.json();
 

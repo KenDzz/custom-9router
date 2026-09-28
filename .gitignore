@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /.next-cli-build/
+/.tmp_build/
 /out/
 cli/.build-home/
 product
@@ -50,6 +51,8 @@ logs/*
 source/*
 .cursor/*
 docs/*
+!docs/CUSTOM_HOOKS.md
+!docs/MEMBER_ACCESS.md
 !docs/ARCHITECTURE.md
 test/*
 open-sse/test/*

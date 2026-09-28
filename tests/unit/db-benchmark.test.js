@@ -31,6 +31,9 @@ beforeAll(async () => {
   vi.resetModules();
   sqliteDb = await import("@/lib/db/index.js");
   await sqliteDb.initDb();
+  const { enterWorkspaceForTest } = await import("@/lib/workspaces/requestContext.js");
+  const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
+  enterWorkspaceForTest({ workspaceId: DEFAULT_WORKSPACE_ID });
 
   // Lowdb setup — direct lowdb usage (mimics legacy behavior)
   tempLowdb = fs.mkdtempSync(path.join(os.tmpdir(), "9router-bench-lowdb-"));
@@ -42,7 +45,8 @@ beforeAll(async () => {
   await lowDb.read();
 });
 
-afterAll(() => {
+afterAll(async () => {
+  await sqliteDb?.closeDb?.();
   if (tempSqlite) fs.rmSync(tempSqlite, { recursive: true, force: true });
   if (tempLowdb) fs.rmSync(tempLowdb, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;

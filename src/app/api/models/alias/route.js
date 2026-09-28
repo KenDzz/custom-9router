@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { getModelAliases, setModelAlias, deleteModelAlias } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/models/alias - Get all aliases
-export async function GET() {
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet());
+}
+
+async function handleGet() {
   try {
     const aliases = await getModelAliases();
     return NextResponse.json({ aliases });
@@ -16,6 +22,10 @@ export async function GET() {
 
 // PUT /api/models/alias - Set model alias
 export async function PUT(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request));
+}
+
+async function handlePut(request) {
   try {
     const body = await request.json();
     const { model, alias } = body;
@@ -35,6 +45,10 @@ export async function PUT(request) {
 
 // DELETE /api/models/alias?alias=xxx - Delete alias
 export async function DELETE(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request));
+}
+
+async function handleDelete(request) {
   try {
     const { searchParams } = new URL(request.url);
     const alias = searchParams.get("alias");

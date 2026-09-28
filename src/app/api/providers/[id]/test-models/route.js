@@ -4,13 +4,20 @@ import { getProviderModels, PROVIDER_ID_TO_ALIAS } from "open-sse/config/provide
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { pingModelByKind } from "@/app/api/models/test/ping";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * POST /api/providers/[id]/test-models
  * id = connectionId — used only to resolve provider + model list.
  * Actual requests go through the internal endpoint that matches each model kind.
+ * Read-only DB access (no create/update/delete) — MEMBER is sufficient.
  */
 export async function POST(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handlePost(request, { params }));
+}
+
+async function handlePost(request, { params }) {
   try {
     const { id } = await params;
     const connection = await getProviderConnectionById(id);

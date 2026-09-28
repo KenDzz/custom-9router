@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { KiroService } from "@/lib/oauth/services/kiro";
 import { createProviderConnection } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 /**
  * POST /api/oauth/kiro/api-key
@@ -9,6 +11,10 @@ import { createProviderConnection } from "@/models";
  * CodeWhisperer profiles, then stored with authMethod="api_key".
  */
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { apiKey, region } = await request.json();
 

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/localDb";
+import { withDashboardOrLlmWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 const langNames = new Intl.DisplayNames(["en"], { type: "language" });
 
@@ -8,6 +10,10 @@ const langNames = new Intl.DisplayNames(["en"], { type: "language" });
  * Returns { languages, byLang } grouped by language code (same shape as edge-tts/elevenlabs)
  */
 export async function GET(request) {
+  return withDashboardOrLlmWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams } = new URL(request.url);
     const langFilter = searchParams.get("lang");

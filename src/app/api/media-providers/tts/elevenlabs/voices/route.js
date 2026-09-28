@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/localDb";
 import { fetchElevenLabsVoices } from "open-sse/handlers/ttsCore.js";
+import { withDashboardOrLlmWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 const langNames = new Intl.DisplayNames(["en"], { type: "language" });
 
@@ -10,6 +12,10 @@ const langNames = new Intl.DisplayNames(["en"], { type: "language" });
  * Uses direct DB read (no mutex) to avoid blocking on concurrent TTS requests
  */
 export async function GET(request) {
+  return withDashboardOrLlmWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request));
+}
+
+async function handleGet(request) {
   try {
     const { searchParams } = new URL(request.url);
     const langFilter = searchParams.get("lang");

@@ -3,6 +3,8 @@ import {
   getProviderConnections,
   updateProviderConnection,
 } from "@/lib/localDb";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 const MODEL_LOCK_PREFIX = "modelLock_";
 
@@ -19,7 +21,11 @@ function getActiveModelLocks(connection) {
     .filter((lock) => lock.active);
 }
 
-export async function GET() {
+export async function GET(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet());
+}
+
+async function handleGet() {
   try {
     const connections = await getProviderConnections();
     const models = [];
@@ -64,6 +70,10 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { action, provider, model } = await request.json();
 

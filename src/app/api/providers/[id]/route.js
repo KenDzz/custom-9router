@@ -5,6 +5,8 @@ import {
   updateProviderConnection,
   deleteProviderConnection,
 } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -61,6 +63,10 @@ function shouldMergeProviderSpecificData(existing, incoming, hasLegacyProxy, has
 
 // GET /api/providers/[id] - Get single connection
 export async function GET(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handleGet(request, { params }));
+}
+
+async function handleGet(request, { params }) {
   try {
     const { id } = await params;
     const connection = await getProviderConnectionById(id);
@@ -85,6 +91,10 @@ export async function GET(request, { params }) {
 
 // PUT /api/providers/[id] - Update connection
 export async function PUT(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePut(request, { params }));
+}
+
+async function handlePut(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
@@ -173,6 +183,10 @@ export async function PUT(request, { params }) {
 
 // DELETE /api/providers/[id] - Delete connection
 export async function DELETE(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDelete(request, { params }));
+}
+
+async function handleDelete(request, { params }) {
   try {
     const { id } = await params;
 

@@ -9,6 +9,7 @@ import HeaderMenu from "@/shared/components/HeaderMenu";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import ThemeToggle from "@/shared/components/ThemeToggle";
 import DonateModal from "@/shared/components/DonateModal";
+import WorkspaceSwitcher from "@/shared/components/WorkspaceSwitcher";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
@@ -16,6 +17,13 @@ import { translate } from "@/i18n/runtime";
 
 const getPageInfo = (pathname) => {
   if (!pathname) return { title: "", description: "", breadcrumbs: [] };
+
+  if (pathname === "/dashboard/members") return {
+    title: "Members", description: "Manage workspace member access and daily limits", icon: "group", breadcrumbs: [],
+  };
+  if (pathname === "/dashboard/member" || pathname.startsWith("/dashboard/member/")) return {
+    title: "My Dashboard", description: "Your token allowance, API keys and usage", icon: "space_dashboard", breadcrumbs: [],
+  };
 
   // Media provider detail: /dashboard/media-providers/[kind]/[id]
   const mediaDetailMatch = pathname.match(/\/media-providers\/([^/]+)\/([^/]+)$/);
@@ -182,6 +190,10 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
   const pathname = usePathname();
   const [displayName, setDisplayName] = useState("");
   const [loginMethod, setLoginMethod] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [workspaces, setWorkspaces] = useState([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [donateOpen, setDonateOpen] = useState(false);
 
   // Memoize page info to prevent unnecessary recalculations
@@ -200,6 +212,14 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
           setDisplayName(data?.displayName || data?.oidcName || data?.oidcEmail || "");
           setLoginMethod(data?.loginMethod || "");
         }
+        const userRes = await fetch("/api/users/me", { cache: "no-store" });
+        if (userRes.ok && !cancelled) {
+          const userData = await userRes.json();
+          setCurrentUser(userData.user || null);
+          setWorkspaces(userData.workspaces || []);
+          setActiveWorkspaceId(userData.activeWorkspaceId || "");
+          setDisplayName((current) => userData.user?.displayName || userData.user?.username || current);
+        }
       } catch {
         if (!cancelled) {
           setDisplayName("");
@@ -213,6 +233,30 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
       cancelled = true;
     };
   }, []);
+
+  const switchWorkspace = async (workspaceId) => {
+    const res = await fetch("/api/auth/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Failed to switch workspace");
+    }
+    setActiveWorkspaceId(workspaceId);
+    window.location.reload();
+  };
+
+  const handleWorkspaceSwitch = async (workspaceId) => {
+    if (!workspaceId || workspaceId === activeWorkspaceId || workspaceBusy) return;
+    setWorkspaceBusy(true);
+    try {
+      await switchWorkspace(workspaceId);
+    } finally {
+      setWorkspaceBusy(false);
+    }
+  };
 
   const handleLogout = async () => {
     try {
@@ -302,6 +346,16 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
 
       {/* Right actions */}
       <div className="flex items-center gap-1 shrink-0">
+        {workspaces.length > 0 && (
+          <WorkspaceSwitcher
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+            currentUser={currentUser}
+            busy={workspaceBusy}
+            onSwitch={handleWorkspaceSwitch}
+            onWorkspacesChange={setWorkspaces}
+          />
+        )}
         {displayName && loginMethod === "OIDC" && (
           <div className="hidden sm:flex items-center max-w-[220px] px-3 py-1.5 rounded-full border border-border bg-surface/70 text-xs text-text-muted truncate">
             <span className="material-symbols-outlined text-[14px] mr-1.5 text-primary">person</span>
@@ -322,7 +376,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
         </button>
         <ThemeToggle />
         <HeaderLanguage />
-        <HeaderMenu onLogout={handleLogout} />
+        <HeaderMenu onLogout={handleLogout} canManageSystem={currentUser ? workspaces.some((workspace) => workspace.id === activeWorkspaceId && workspace.role === "owner") : !pathname.startsWith("/dashboard/member")} />
       </div>
       <DonateModal isOpen={donateOpen} onClose={() => setDonateOpen(false)} />
     </header>

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 3;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -31,9 +31,76 @@ export const TABLES = {
       data: "TEXT NOT NULL",
     },
   },
+  users: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      username: "TEXT UNIQUE NOT NULL",
+      email: "TEXT UNIQUE",
+      displayName: "TEXT",
+      passwordHash: "TEXT",
+      oidcIssuer: "TEXT",
+      oidcSubject: "TEXT",
+      isActive: "INTEGER NOT NULL DEFAULT 1",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oidc_identity ON users(oidcIssuer, oidcSubject) WHERE oidcIssuer IS NOT NULL AND oidcSubject IS NOT NULL",
+      "CREATE INDEX IF NOT EXISTS idx_users_active ON users(isActive)",
+    ],
+  },
+  workspaces: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      name: "TEXT NOT NULL",
+      isDefault: "INTEGER NOT NULL DEFAULT 0",
+      createdByUserId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_default ON workspaces(isDefault) WHERE isDefault = 1",
+      "CREATE INDEX IF NOT EXISTS idx_workspaces_created_by ON workspaces(createdByUserId)",
+    ],
+  },
+  workspaceMembers: {
+    columns: {
+      workspaceId: "TEXT NOT NULL",
+      userId: "TEXT NOT NULL",
+      role: "TEXT NOT NULL CHECK (role IN ('member', 'admin', 'owner'))",
+      dailyTokenLimit: "INTEGER NOT NULL DEFAULT 0",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    primaryKey: "PRIMARY KEY (workspaceId, userId)",
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspaceMembers(userId)",
+      "CREATE INDEX IF NOT EXISTS idx_workspace_members_role ON workspaceMembers(workspaceId, role)",
+    ],
+  },
+  workspaceInvites: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
+      email: "TEXT NOT NULL",
+      role: "TEXT NOT NULL CHECK (role IN ('member', 'admin'))",
+      tokenHash: "TEXT UNIQUE NOT NULL",
+      invitedByUserId: "TEXT NOT NULL",
+      expiresAt: "TEXT NOT NULL",
+      acceptedAt: "TEXT",
+      revokedAt: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_workspace_invites_workspace ON workspaceInvites(workspaceId, createdAt DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_workspace_invites_email ON workspaceInvites(workspaceId, email)",
+    ],
+  },
   providerConnections: {
     columns: {
       id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
       provider: "TEXT NOT NULL",
       authType: "TEXT NOT NULL",
       name: "TEXT",
@@ -45,25 +112,29 @@ export const TABLES = {
       updatedAt: "TEXT NOT NULL",
     },
     indexes: [
-      "CREATE INDEX IF NOT EXISTS idx_pc_provider ON providerConnections(provider)",
-      "CREATE INDEX IF NOT EXISTS idx_pc_provider_active ON providerConnections(provider, isActive)",
-      "CREATE INDEX IF NOT EXISTS idx_pc_priority ON providerConnections(provider, priority)",
+      "CREATE INDEX IF NOT EXISTS idx_pc_workspace_provider ON providerConnections(workspaceId, provider)",
+      "CREATE INDEX IF NOT EXISTS idx_pc_workspace_provider_active ON providerConnections(workspaceId, provider, isActive)",
+      "CREATE INDEX IF NOT EXISTS idx_pc_workspace_priority ON providerConnections(workspaceId, provider, priority)",
     ],
   },
   providerNodes: {
     columns: {
       id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
       type: "TEXT",
       name: "TEXT",
       data: "TEXT NOT NULL",
       createdAt: "TEXT NOT NULL",
       updatedAt: "TEXT NOT NULL",
     },
-    indexes: ["CREATE INDEX IF NOT EXISTS idx_pn_type ON providerNodes(type)"],
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_pn_workspace_type ON providerNodes(workspaceId, type)",
+    ],
   },
   proxyPools: {
     columns: {
       id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
       isActive: "INTEGER DEFAULT 1",
       testStatus: "TEXT",
       data: "TEXT NOT NULL",
@@ -71,31 +142,40 @@ export const TABLES = {
       updatedAt: "TEXT NOT NULL",
     },
     indexes: [
-      "CREATE INDEX IF NOT EXISTS idx_pp_active ON proxyPools(isActive)",
-      "CREATE INDEX IF NOT EXISTS idx_pp_status ON proxyPools(testStatus)",
+      "CREATE INDEX IF NOT EXISTS idx_pp_workspace_active ON proxyPools(workspaceId, isActive)",
+      "CREATE INDEX IF NOT EXISTS idx_pp_workspace_status ON proxyPools(workspaceId, testStatus)",
     ],
   },
   apiKeys: {
     columns: {
       id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
+      userId: "TEXT",
       key: "TEXT UNIQUE NOT NULL",
       name: "TEXT",
       machineId: "TEXT",
       isActive: "INTEGER DEFAULT 1",
       createdAt: "TEXT NOT NULL",
     },
-    indexes: ["CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)"],
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)",
+      "CREATE INDEX IF NOT EXISTS idx_ak_workspace_created ON apiKeys(workspaceId, createdAt)",
+      "CREATE INDEX IF NOT EXISTS idx_ak_workspace_user ON apiKeys(workspaceId, userId, createdAt)",
+    ],
   },
   combos: {
     columns: {
       id: "TEXT PRIMARY KEY",
-      name: "TEXT UNIQUE NOT NULL",
+      workspaceId: "TEXT NOT NULL",
+      name: "TEXT NOT NULL",
       kind: "TEXT",
       models: "TEXT NOT NULL",
       createdAt: "TEXT NOT NULL",
       updatedAt: "TEXT NOT NULL",
     },
-    indexes: ["CREATE INDEX IF NOT EXISTS idx_combo_name ON combos(name)"],
+    indexes: [
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_combo_workspace_name ON combos(workspaceId, name)",
+    ],
   },
   kv: {
     columns: {
@@ -106,9 +186,23 @@ export const TABLES = {
     primaryKey: "PRIMARY KEY (scope, key)",
     indexes: ["CREATE INDEX IF NOT EXISTS idx_kv_scope ON kv(scope)"],
   },
+  workspaceKv: {
+    columns: {
+      workspaceId: "TEXT NOT NULL",
+      scope: "TEXT NOT NULL",
+      key: "TEXT NOT NULL",
+      value: "TEXT NOT NULL",
+    },
+    primaryKey: "PRIMARY KEY (workspaceId, scope, key)",
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_workspace_kv_scope ON workspaceKv(workspaceId, scope)",
+    ],
+  },
   usageHistory: {
     columns: {
       id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+      workspaceId: "TEXT NOT NULL",
+      userId: "TEXT",
       timestamp: "TEXT NOT NULL",
       provider: "TEXT",
       model: "TEXT",
@@ -123,21 +217,31 @@ export const TABLES = {
       meta: "TEXT",
     },
     indexes: [
-      "CREATE INDEX IF NOT EXISTS idx_uh_ts ON usageHistory(timestamp DESC)",
-      "CREATE INDEX IF NOT EXISTS idx_uh_provider ON usageHistory(provider)",
-      "CREATE INDEX IF NOT EXISTS idx_uh_model ON usageHistory(model)",
-      "CREATE INDEX IF NOT EXISTS idx_uh_conn ON usageHistory(connectionId)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_workspace_ts ON usageHistory(workspaceId, timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_workspace_provider ON usageHistory(workspaceId, provider)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_workspace_model ON usageHistory(workspaceId, model)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_workspace_conn ON usageHistory(workspaceId, connectionId)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_workspace_user_ts ON usageHistory(workspaceId, userId, timestamp DESC)",
     ],
   },
   usageDaily: {
     columns: {
-      dateKey: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
+      dateKey: "TEXT NOT NULL",
       data: "TEXT NOT NULL",
+    },
+    primaryKey: "PRIMARY KEY (workspaceId, dateKey)",
+  },
+  workspaceUsageMeta: {
+    columns: {
+      workspaceId: "TEXT PRIMARY KEY",
+      totalRequestsLifetime: "INTEGER NOT NULL DEFAULT 0",
     },
   },
   requestDetails: {
     columns: {
       id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
       timestamp: "TEXT NOT NULL",
       provider: "TEXT",
       model: "TEXT",
@@ -146,10 +250,10 @@ export const TABLES = {
       data: "TEXT NOT NULL",
     },
     indexes: [
-      "CREATE INDEX IF NOT EXISTS idx_rd_ts ON requestDetails(timestamp DESC)",
-      "CREATE INDEX IF NOT EXISTS idx_rd_provider ON requestDetails(provider)",
-      "CREATE INDEX IF NOT EXISTS idx_rd_model ON requestDetails(model)",
-      "CREATE INDEX IF NOT EXISTS idx_rd_conn ON requestDetails(connectionId)",
+      "CREATE INDEX IF NOT EXISTS idx_rd_workspace_ts ON requestDetails(workspaceId, timestamp DESC)",
+      "CREATE INDEX IF NOT EXISTS idx_rd_workspace_provider ON requestDetails(workspaceId, provider)",
+      "CREATE INDEX IF NOT EXISTS idx_rd_workspace_model ON requestDetails(workspaceId, model)",
+      "CREATE INDEX IF NOT EXISTS idx_rd_workspace_conn ON requestDetails(workspaceId, connectionId)",
     ],
   },
 };

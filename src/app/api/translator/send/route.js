@@ -1,5 +1,7 @@
 import { getProviderConnections, updateProviderConnection } from "@/lib/localDb.js";
 import { getExecutor } from "open-sse/index.js";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 async function persistRefreshedCredentials(connection, newCredentials) {
   const updateData = {};
@@ -33,6 +35,10 @@ async function persistRefreshedCredentials(connection, newCredentials) {
 }
 
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const { provider, model, body } = await request.json();
 

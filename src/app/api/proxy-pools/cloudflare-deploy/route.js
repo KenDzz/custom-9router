@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createProxyPool } from "@/models";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // Relay worker source code deployed to Cloudflare
 const RELAY_WORKER_CODE = `
@@ -48,6 +50,10 @@ export default {
 
 // POST /api/proxy-pools/cloudflare-deploy
 export async function POST(request) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost(request));
+}
+
+async function handlePost(request) {
   try {
     const body = await request.json();
     const accountId = body.accountId?.trim();

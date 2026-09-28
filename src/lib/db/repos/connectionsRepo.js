@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { requireWorkspaceId } from "@/lib/workspaces/requestContext.js";
 
 const OPTIONAL_FIELDS = [
   "displayName", "email", "globalPriority", "defaultModel",
@@ -43,16 +44,16 @@ function connToRow(c) {
   };
 }
 
-function upsert(db, c) {
+function upsert(db, c, workspaceId) {
   const r = connToRow(c);
   db.run(
-    `INSERT INTO providerConnections(id, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO providerConnections(id, workspaceId, provider, authType, name, email, priority, isActive, data, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        provider=excluded.provider, authType=excluded.authType, name=excluded.name,
        email=excluded.email, priority=excluded.priority, isActive=excluded.isActive,
        data=excluded.data, updatedAt=excluded.updatedAt`,
-    [r.id, r.provider, r.authType, r.name, r.email, r.priority, r.isActive, r.data, r.createdAt, r.updatedAt]
+    [r.id, workspaceId, r.provider, r.authType, r.name, r.email, r.priority, r.isActive, r.data, r.createdAt, r.updatedAt]
   );
 }
 
@@ -69,26 +70,42 @@ function deriveConnectionName(data, fallbackName) {
 
 export async function getProviderConnections(filter = {}) {
   const db = await getAdapter();
-  const where = [];
-  const params = [];
+  const workspaceId = requireWorkspaceId();
+  const where = ["workspaceId = ?"];
+  const params = [workspaceId];
   if (filter.provider) { where.push("provider = ?"); params.push(filter.provider); }
   if (filter.isActive !== undefined) { where.push("isActive = ?"); params.push(filter.isActive ? 1 : 0); }
-  const sql = `SELECT * FROM providerConnections${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
+  const sql = `SELECT * FROM providerConnections WHERE ${where.join(" AND ")}`;
   const rows = db.all(sql, params);
   const list = rows.map(rowToConn);
   list.sort((a, b) => (a.priority || 999) - (b.priority || 999));
   return list;
 }
 
+// Background-maintenance boundary only. Request code must use the scoped
+// getProviderConnections() above. Each returned row carries its workspaceId so
+// the caller can re-enter that workspace before reading or mutating it.
+export async function getProviderConnectionsAcrossWorkspaces(filter = {}) {
+  const db = await getAdapter();
+  const where = [];
+  const params = [];
+  if (filter.provider) { where.push("provider = ?"); params.push(filter.provider); }
+  if (filter.isActive !== undefined) { where.push("isActive = ?"); params.push(filter.isActive ? 1 : 0); }
+  const sql = `SELECT * FROM providerConnections${where.length ? ` WHERE ${where.join(" AND ")}` : ""}`;
+  return db.all(sql, params)
+    .map((row) => ({ ...rowToConn(row), workspaceId: row.workspaceId }))
+    .sort((a, b) => (a.priority || 999) - (b.priority || 999));
+}
+
 export async function getProviderConnectionById(id) {
   const db = await getAdapter();
-  const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+  const row = db.get(`SELECT * FROM providerConnections WHERE id = ? AND workspaceId = ?`, [id, requireWorkspaceId()]);
   return rowToConn(row);
 }
 
 // Internal sync reorder — must be called INSIDE a transaction
-function reorderInTx(db, providerId) {
-  const list = db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [providerId]).map(rowToConn);
+function reorderInTx(db, workspaceId, providerId) {
+  const list = db.all(`SELECT * FROM providerConnections WHERE workspaceId = ? AND provider = ?`, [workspaceId, providerId]).map(rowToConn);
   list.sort((a, b) => {
     const pDiff = (a.priority || 0) - (b.priority || 0);
     if (pDiff !== 0) return pDiff;
@@ -101,11 +118,12 @@ function reorderInTx(db, providerId) {
 
 export async function createProviderConnection(data) {
   const db = await getAdapter();
+  const workspaceId = requireWorkspaceId();
   const now = new Date().toISOString();
   let result;
 
   db.transaction(() => {
-    const all = db.all(`SELECT * FROM providerConnections WHERE provider = ?`, [data.provider]).map(rowToConn);
+    const all = db.all(`SELECT * FROM providerConnections WHERE workspaceId = ? AND provider = ?`, [workspaceId, data.provider]).map(rowToConn);
 
     let existing = null;
     if (data.authType === "oauth" && data.email) {
@@ -148,7 +166,7 @@ export async function createProviderConnection(data) {
 
     if (existing) {
       const merged = { ...existing, ...data, updatedAt: now };
-      upsert(db, merged);
+      upsert(db, merged, workspaceId);
       result = merged;
       return;
     }
@@ -180,8 +198,8 @@ export async function createProviderConnection(data) {
     }
     if (data.email !== undefined) conn.email = data.email;
 
-    upsert(db, conn);
-    reorderInTx(db, data.provider);
+    upsert(db, conn, workspaceId);
+    reorderInTx(db, workspaceId, data.provider);
     result = conn;
   });
 
@@ -191,14 +209,15 @@ export async function createProviderConnection(data) {
 // Critical: OAuth refresh token race — atomic merge inside transaction
 export async function updateProviderConnection(id, data) {
   const db = await getAdapter();
+  const workspaceId = requireWorkspaceId();
   let result;
   db.transaction(() => {
-    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
     if (!row) { result = null; return; }
     const existing = rowToConn(row);
     const merged = { ...existing, ...data, updatedAt: new Date().toISOString() };
-    upsert(db, merged);
-    if (data.priority !== undefined) reorderInTx(db, existing.provider);
+    upsert(db, merged, workspaceId);
+    if (data.priority !== undefined) reorderInTx(db, workspaceId, existing.provider);
     result = merged;
   });
   return result;
@@ -206,12 +225,13 @@ export async function updateProviderConnection(id, data) {
 
 export async function deleteProviderConnection(id) {
   const db = await getAdapter();
+  const workspaceId = requireWorkspaceId();
   let ok = false;
   db.transaction(() => {
-    const row = db.get(`SELECT provider FROM providerConnections WHERE id = ?`, [id]);
+    const row = db.get(`SELECT provider FROM providerConnections WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
     if (!row) return;
-    db.run(`DELETE FROM providerConnections WHERE id = ?`, [id]);
-    reorderInTx(db, row.provider);
+    db.run(`DELETE FROM providerConnections WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
+    reorderInTx(db, workspaceId, row.provider);
     ok = true;
   });
   return ok;
@@ -219,16 +239,22 @@ export async function deleteProviderConnection(id) {
 
 export async function deleteProviderConnectionsByProvider(providerId) {
   const db = await getAdapter();
-  const before = db.get(`SELECT COUNT(*) AS n FROM providerConnections WHERE provider = ?`, [providerId]);
-  db.run(`DELETE FROM providerConnections WHERE provider = ?`, [providerId]);
+  const workspaceId = requireWorkspaceId();
+  const before = db.get(`SELECT COUNT(*) AS n FROM providerConnections WHERE provider = ? AND workspaceId = ?`, [providerId, workspaceId]);
+  db.run(`DELETE FROM providerConnections WHERE provider = ? AND workspaceId = ?`, [providerId, workspaceId]);
   return before?.n || 0;
 }
 
 export async function reorderProviderConnections(providerId) {
   const db = await getAdapter();
-  db.transaction(() => reorderInTx(db, providerId));
+  const workspaceId = requireWorkspaceId();
+  db.transaction(() => reorderInTx(db, workspaceId, providerId));
 }
 
+// Maintenance sweep, run at startup outside any request context (see
+// initializeApp.js) — no ALS workspace to read, so it iterates all rows
+// globally and writes back each row's own workspaceId. Strips null/empty
+// fields only; never moves data across workspaces.
 export async function cleanupProviderConnections() {
   const db = await getAdapter();
   const fieldsToCheck = [
@@ -254,7 +280,7 @@ export async function cleanupProviderConnections() {
         cleaned++;
         dirty = true;
       }
-      if (dirty) upsert(db, conn);
+      if (dirty) upsert(db, conn, row.workspaceId);
     }
   });
   return cleaned;
