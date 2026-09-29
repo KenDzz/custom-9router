@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { acquireMemberPermit, finishMemberUsage, keepPermitUntilResponseEnds } from "./memberQuota.js";
 import { recordUntrackedMemberUsage } from "./memberUsage.js";
+import { authorizeModelRequest, filterModelCatalog } from "./modelAccess.js";
 
 const als = new AsyncLocalStorage();
 
@@ -128,10 +129,15 @@ export async function withLlmWorkspace(request, callback) {
     return Response.json({ error: "API key required" }, { status: 401 });
   }
   try {
+    const { access, error } = await runWithWorkspace(context, () => authorizeModelRequest(request, context));
+    if (error) {
+      releasePermit?.();
+      return error;
+    }
     const response = await runWithWorkspace(context, async () => {
       const result = await callback(context);
       await recordUntrackedMemberUsage(request, result, context);
-      return result;
+      return filterModelCatalog(request, result, access);
     });
     return releasePermit ? await keepPermitUntilResponseEnds(response, context, releasePermit) : response;
   } catch (error) {

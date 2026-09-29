@@ -53,6 +53,7 @@ source/*
 docs/*
 !docs/CUSTOM_HOOKS.md
 !docs/MEMBER_ACCESS.md
+!docs/MODEL_ACCESS.md
 !docs/ARCHITECTURE.md
 test/*
 open-sse/test/*

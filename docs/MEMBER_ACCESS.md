@@ -12,6 +12,8 @@ merged without reapplying business rules throughout the request pipeline.
 | Workspace member management | Yes | No |
 | View/edit member profile and reset password | Yes | No |
 | Set per-member daily token limit | Yes | No |
+| Set workspace/member allowed models and combos | Yes | No |
+| View effective model allowance | Yes | Yes, read-only |
 | Personal usage dashboard | Optional | Yes |
 | Personal API-key CRUD | Yes through existing UI | Yes through member UI |
 | LLM API after daily limit is reached | Unlimited | HTTP 429 until next local midnight |
@@ -100,3 +102,6 @@ npx vitest run --config tests/vitest.config.js tests/unit/workspace-*.test.js te
 
 Then lint the changed files and test one owner plus one limited member in the
 browser.
+
+See [MODEL_ACCESS.md](MODEL_ACCESS.md) for workspace/member model allow-lists,
+combo semantics, persistence and the additional upgrade regression test.

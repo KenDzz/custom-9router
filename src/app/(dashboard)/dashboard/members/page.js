@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Avatar, Badge, Button, Card, Input, Modal, Select } from "@/shared/components";
+import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -144,7 +145,7 @@ export default function MembersPage() {
             Owner controls
           </div>
           <h1 className="text-2xl font-bold text-text-main">Member management</h1>
-          <p className="mt-1 text-sm text-text-muted">Manage profiles, passwords, roles and daily token limits for {workspace?.name || "this workspace"}.</p>
+          <p className="mt-1 text-sm text-text-muted">Manage profiles, passwords, token limits and model access for {workspace?.name || "this workspace"}.</p>
         </div>
         <Badge variant="primary" icon="group">{members.length} members</Badge>
       </div>
@@ -154,6 +155,8 @@ export default function MembersPage() {
           {status.message}
         </div>
       )}
+
+      {workspace && <ModelAccessPanel key={workspace.id} workspaceId={workspace.id} />}
 
       <Card padding="none">
         <div className="flex flex-col gap-3 border-b border-border-subtle p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -264,6 +267,8 @@ export default function MembersPage() {
                   hint={form.role === "owner" ? "Owners always have unlimited usage." : "Use 0 for unlimited usage."}
                 />
               </div>
+
+              {profile && <ModelAccessPanel key={selected.userId} workspaceId={workspace.id} userId={selected.userId} />}
 
               <div className="rounded-[14px] border border-border-subtle p-4">
                 <h4 className="font-semibold text-text-main">Reset password</h4>

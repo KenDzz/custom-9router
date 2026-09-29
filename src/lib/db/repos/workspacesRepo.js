@@ -186,6 +186,7 @@ export async function removeMember(workspaceId, userId) {
     }
     db.run(`UPDATE apiKeys SET isActive = 0 WHERE workspaceId = ? AND userId = ?`, [workspaceId, userId]);
     db.run(`DELETE FROM workspaceMembers WHERE workspaceId = ? AND userId = ?`, [workspaceId, userId]);
+    db.run(`DELETE FROM workspaceKv WHERE workspaceId = ? AND scope = 'modelAccess' AND key = ?`, [workspaceId, `member:${userId}`]);
   });
   if (error) throw error;
 }

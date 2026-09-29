@@ -20,6 +20,7 @@ async function readResponse(response) {
 
 export default function MemberDashboardPage() {
   const [dashboard, setDashboard] = useState(null);
+  const [modelAccess, setModelAccess] = useState(null);
   const [keys, setKeys] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -43,6 +44,7 @@ export default function MemberDashboardPage() {
         fetch("/api/users/me", { cache: "no-store" }).then(readResponse),
       ]);
       setDashboard(overview.dashboard);
+      setModelAccess(overview.modelAccess);
       setKeys(keyData.keys || []);
       setWorkspace((me.workspaces || []).find((item) => item.id === me.activeWorkspaceId) || null);
       if (!quiet) setStatus({ type: "", message: "" });
@@ -203,6 +205,17 @@ export default function MemberDashboardPage() {
           <MiniStat label="Active API keys" value={`${dashboard?.keys.active || 0}/${dashboard?.keys.total || 0}`} icon="vpn_key" />
         </div>
       </div>
+
+      {modelAccess && <Card title="My model access" subtitle={modelAccess.inheritsWorkspace ? "Inherited from your workspace" : "Assigned by your Owner, within the workspace allowance"} icon="tune">
+        {modelAccess.mode === "all" ? <p className="text-sm text-text-muted">You can use all configured models and combos.</p> : <>
+          {!modelAccess.models.length && !modelAccess.combos.length && <p className="text-sm text-amber-600">No models or combos allowed. Ask your Owner to grant access.</p>}
+          <div className="flex flex-wrap gap-2">
+            {modelAccess.models.map((model) => <span key={model} className="max-w-full break-all rounded-[8px] bg-surface-2 px-3 py-1.5 font-mono text-xs text-text-main">{model}</span>)}
+            {modelAccess.combos.map((combo) => <Badge key={combo.id} variant="primary" icon="route">{combo.name}</Badge>)}
+          </div>
+          <p className="mt-3 text-xs text-text-muted">Use a model ID or combo name in your request. Combo access does not grant direct access to its models.</p>
+        </>}
+      </Card>}
 
       <Card title="Last 7 days" subtitle="Input and output tokens charged to your API keys" icon="bar_chart">
         <div className="flex h-44 items-end gap-2 sm:gap-3">

@@ -261,3 +261,14 @@ a workspace-scoped repository call is added without a dashboard/LLM boundary.
 See `MEMBER_ACCESS.md` for member quota behavior and the focused regression
 command. Extension separation reduces merge work; it does not guarantee that
 every future upstream schema or API change is automatically compatible.
+
+### Model access extension
+
+See `MODEL_ACCESS.md`. The existing `withLlmWorkspace` boundary now authorizes
+the actual model/combo before provider routing and filters model catalogs.
+Policies use the existing workspaceKv table, so no new migration is introduced.
+Member removal cleans its policy. Owner configuration lives in custom
+model-access endpoints and the Members page; Member overview is read-only.
+Keep the target extractor aligned with upstream aliases, Gemini URL handling,
+provider-as-model search/fetch, and video default-provider behavior on upgrade.
+Run `tests/unit/workspace-model-access.test.js` alongside route coverage.
