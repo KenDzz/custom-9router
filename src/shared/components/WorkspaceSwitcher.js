@@ -147,7 +147,6 @@ function WorkspaceManagerModal({
   const [status, setStatus] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [memberForm, setMemberForm] = useState({ identifier: "", role: "member", dailyTokenLimit: "0" });
-  const [inviteForm, setInviteForm] = useState({ email: "", role: "member", dailyTokenLimit: "0" });
   const [inviteLink, setInviteLink] = useState("");
 
   const canManage = workspace?.role === "owner" || workspace?.role === "admin";
@@ -211,45 +210,35 @@ function WorkspaceManagerModal({
     }, "Workspace name updated");
   };
 
-  const addMember = async (event) => {
+  const addOrInviteMember = async (event) => {
     event.preventDefault();
-    if (!memberForm.identifier.trim()) return;
+    const identifier = memberForm.identifier.trim();
+    if (!identifier) return;
     const limit = isOwner ? parseDailyTokenLimit(memberForm.dailyTokenLimit) : undefined;
     if (isOwner && limit === null) {
       setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
       return;
     }
-    await runAction("add-member", async () => {
-      await readResponse(await fetch(`/api/workspaces/${workspace.id}/members`, {
+    await runAction("add-or-invite", async () => {
+      const result = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members/onboard`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: memberForm.identifier.trim(), role: memberForm.role, dailyTokenLimit: limit }),
+        body: JSON.stringify({ identifier, role: memberForm.role, dailyTokenLimit: limit }),
       }));
-      const data = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members`, { cache: "no-store" }));
-      setMembers(data.members || []);
+      if (result.mode === "invited") {
+        setInviteLink(`${window.location.origin}/invite?token=${encodeURIComponent(result.invite.token)}`);
+        setInvites((current) => [result.invite, ...current]);
+        setStatus({ type: "success", message: "Invitation created — copy the link and send it to the member" });
+      } else if (result.mode === "added") {
+        const data = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members`, { cache: "no-store" }));
+        setMembers(data.members || []);
+        setInviteLink("");
+        setStatus({ type: "success", message: "Member added to this workspace" });
+      } else {
+        throw new Error("Unexpected member onboarding response");
+      }
       setMemberForm({ identifier: "", role: "member", dailyTokenLimit: "0" });
-    }, "Member added to this workspace");
-  };
-
-  const inviteMember = async (event) => {
-    event.preventDefault();
-    if (!inviteForm.email.trim()) return;
-    const limit = isOwner ? parseDailyTokenLimit(inviteForm.dailyTokenLimit) : undefined;
-    if (isOwner && limit === null) {
-      setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
-      return;
-    }
-    await runAction("invite", async () => {
-      const data = await readResponse(await fetch(`/api/workspaces/${workspace.id}/invites`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteForm.email.trim(), role: inviteForm.role, dailyTokenLimit: limit }),
-      }));
-      const link = `${window.location.origin}/invite?token=${encodeURIComponent(data.invite.token)}`;
-      setInviteLink(link);
-      setInvites((current) => [data.invite, ...current]);
-      setInviteForm({ email: "", role: "member", dailyTokenLimit: "0" });
-    }, "Invitation created — copy the link and send it to the member");
+    });
   };
 
   const updateRole = async (member, role) => {
@@ -405,12 +394,15 @@ function WorkspaceManagerModal({
           ) : (
             <div className="space-y-5">
               {canManage && (
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <section className="rounded-[14px] border border-border-subtle p-4">
-                    <h4 className="font-semibold text-text-main">Add existing user</h4>
-                    <p className="mt-1 text-xs text-text-muted">Grant access immediately using a username or email.</p>
-                    <form onSubmit={addMember} className="mt-4 space-y-3">
+                <section className="rounded-[14px] border border-border-subtle p-4">
+                  <h4 className="font-semibold text-text-main">Add a member</h4>
+                  <p className="mt-1 text-xs text-text-muted">
+                    Existing accounts get access immediately. A new email address gets an invitation link that expires after seven days.
+                  </p>
+                  <form onSubmit={addOrInviteMember} className="mt-4 space-y-3">
+                    <div className={`grid gap-3 ${isOwner ? "sm:grid-cols-2" : ""}`}>
                       <Input
+                        label="Username or email"
                         placeholder="Username or email"
                         icon="person_add"
                         value={memberForm.identifier}
@@ -422,53 +414,21 @@ function WorkspaceManagerModal({
                           onChange={(dailyTokenLimit) => setMemberForm((current) => ({ ...current, dailyTokenLimit }))}
                         />
                       )}
-                      <div className="flex gap-2">
-                        <Select
-                          aria-label="Existing user role"
-                          options={ROLE_OPTIONS}
-                          value={memberForm.role}
-                          onChange={(event) => setMemberForm((current) => ({ ...current, role: event.target.value }))}
-                          className="flex-1"
-                        />
-                        <Button type="submit" icon="add" loading={action === "add-member"} disabled={!memberForm.identifier.trim() || (isOwner && parseDailyTokenLimit(memberForm.dailyTokenLimit) === null)}>
-                          Add
-                        </Button>
-                      </div>
-                    </form>
-                  </section>
-
-                  <section className="rounded-[14px] border border-border-subtle p-4">
-                    <h4 className="font-semibold text-text-main">Invite new member</h4>
-                    <p className="mt-1 text-xs text-text-muted">Create a secure link that expires after seven days.</p>
-                    <form onSubmit={inviteMember} className="mt-4 space-y-3">
-                      <Input
-                        type="email"
-                        placeholder="name@company.com"
-                        icon="mail"
-                        value={inviteForm.email}
-                        onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
+                    </div>
+                    <div className="flex gap-2">
+                      <Select
+                        aria-label="Member role"
+                        options={ROLE_OPTIONS}
+                        value={memberForm.role}
+                        onChange={(event) => setMemberForm((current) => ({ ...current, role: event.target.value }))}
+                        className="flex-1"
                       />
-                      {isOwner && (
-                        <DailyTokenLimitInput
-                          value={inviteForm.dailyTokenLimit}
-                          onChange={(dailyTokenLimit) => setInviteForm((current) => ({ ...current, dailyTokenLimit }))}
-                        />
-                      )}
-                      <div className="flex gap-2">
-                        <Select
-                          aria-label="Invitation role"
-                          options={ROLE_OPTIONS}
-                          value={inviteForm.role}
-                          onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))}
-                          className="flex-1"
-                        />
-                        <Button type="submit" icon="send" loading={action === "invite"} disabled={!inviteForm.email.trim() || (isOwner && parseDailyTokenLimit(inviteForm.dailyTokenLimit) === null)}>
-                          Invite
-                        </Button>
-                      </div>
-                    </form>
-                  </section>
-                </div>
+                      <Button type="submit" icon="person_add" loading={action === "add-or-invite"} disabled={!memberForm.identifier.trim() || (isOwner && parseDailyTokenLimit(memberForm.dailyTokenLimit) === null)}>
+                        Add or invite
+                      </Button>
+                    </div>
+                  </form>
+                </section>
               )}
 
               {inviteLink && (

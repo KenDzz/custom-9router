@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { WORKSPACE_ROLES } from "../../workspaces/constants.js";
+import { getActiveGiftBalances, listMemberGifts } from "./memberGiftsRepo.js";
 
 function startOfLocalDay(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -16,7 +17,7 @@ function toDateKey(date) {
 export async function getMemberTokenStatus(workspaceId, userId) {
   const db = await getAdapter();
   const membership = db.get(
-    `SELECT m.role, m.dailyTokenLimit FROM workspaceMembers m
+    `SELECT m.role, m.dailyTokenLimit, m.quotaResetAt, m.quotaResetHistoryId FROM workspaceMembers m
      JOIN users u ON u.id = m.userId AND u.isActive = 1
      WHERE m.workspaceId = ? AND m.userId = ?`,
     [workspaceId, userId],
@@ -25,14 +26,18 @@ export async function getMemberTokenStatus(workspaceId, userId) {
 
   const start = startOfLocalDay();
   const reset = nextLocalDay(start);
+  const dayStart = start.toISOString();
+  const quotaStart = membership.quotaResetAt && membership.quotaResetAt > dayStart
+    ? membership.quotaResetAt : dayStart;
   const usage = db.get(
     `SELECT
        COUNT(*) AS requests,
        COALESCE(SUM(promptTokens), 0) AS promptTokens,
-       COALESCE(SUM(completionTokens), 0) AS completionTokens
+       COALESCE(SUM(completionTokens), 0) AS completionTokens,
+       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN promptTokens + completionTokens ELSE 0 END), 0) AS quotaTokens
      FROM usageHistory
      WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp < ?`,
-    [workspaceId, userId, start.toISOString(), reset.toISOString()],
+    [quotaStart, Number(membership.quotaResetHistoryId || 0), workspaceId, userId, dayStart, reset.toISOString()],
   ) || {};
 
   const limit = membership.role === WORKSPACE_ROLES.OWNER
@@ -40,18 +45,27 @@ export async function getMemberTokenStatus(workspaceId, userId) {
     : Number(membership.dailyTokenLimit || 0);
   const promptTokens = Number(usage.promptTokens || 0);
   const completionTokens = Number(usage.completionTokens || 0);
-  const usedTokens = promptTokens + completionTokens;
+  const actualUsedToday = promptTokens + completionTokens;
+  const usedTokens = Number(usage.quotaTokens || 0);
+  const giftBalances = getActiveGiftBalances(db, workspaceId, userId);
+  const remainingTokens = limit > 0
+    ? Math.max(0, limit - usedTokens) + giftBalances.tokens
+    : null;
 
   return {
     role: membership.role,
     dailyTokenLimit: limit,
     usedTokens,
+    actualUsedToday,
     promptTokens,
     completionTokens,
     requests: Number(usage.requests || 0),
-    remainingTokens: limit > 0 ? Math.max(0, limit - usedTokens) : null,
-    percentage: limit > 0 ? Math.min(100, Math.round((usedTokens / limit) * 1000) / 10) : 0,
-    limitReached: limit > 0 && usedTokens >= limit,
+    tokenGiftRemaining: giftBalances.tokens,
+    resetGiftsAvailable: giftBalances.reset,
+    quotaResetAt: membership.quotaResetAt || null,
+    remainingTokens,
+    percentage: limit > 0 ? Math.min(100, Math.round((usedTokens / (usedTokens + remainingTokens)) * 1000) / 10) : 0,
+    limitReached: limit > 0 && remainingTokens <= 0,
     resetsAt: reset.toISOString(),
   };
 }
@@ -104,6 +118,7 @@ export async function getMemberDashboard(workspaceId, userId) {
 
   return {
     tokenStatus,
+    gifts: await listMemberGifts(workspaceId, userId),
     chart,
     recent,
     keys: { total: Number(keyStats.total || 0), active: Number(keyStats.active || 0) },

@@ -36,7 +36,7 @@ describe("Schema migrations", () => {
     expect(tables).toEqual(expect.arrayContaining([
       "_meta", "settings", "providerConnections", "providerNodes",
       "proxyPools", "apiKeys", "combos", "kv", "usageHistory", "usageDaily", "requestDetails",
-      "users", "workspaces", "workspaceMembers", "workspaceInvites", "workspaceKv", "workspaceUsageMeta",
+      "users", "workspaces", "workspaceMembers", "workspaceInvites", "workspaceMemberGifts", "workspaceKv", "workspaceUsageMeta",
     ]));
 
     // Fresh DB seeds a deterministic Default workspace + admin owner.
@@ -45,6 +45,8 @@ describe("Schema migrations", () => {
     const membership = db.get(`SELECT role FROM workspaceMembers WHERE workspaceId = ?`, [workspace.id]);
     expect(membership?.role).toBe("owner");
     expect(db.all("PRAGMA table_info(workspaceInvites)").map((column) => column.name)).toContain("dailyTokenLimit");
+    expect(db.all("PRAGMA table_info(workspaceMembers)").map((column) => column.name)).toContain("quotaResetAt");
+    expect(db.all("PRAGMA table_info(workspaceMembers)").map((column) => column.name)).toContain("quotaResetHistoryId");
   });
 
   it("adds invitation limits to an existing v3 database without dropping pending invites", async () => {
@@ -67,7 +69,7 @@ describe("Schema migrations", () => {
     const upgraded = await getUpgradedAdapter();
     expect(upgraded.get("SELECT email, dailyTokenLimit FROM workspaceInvites WHERE id = 'old-invite'"))
       .toMatchObject({ email: "legacy@example.com", dailyTokenLimit: null });
-    expect(upgraded.get("SELECT value FROM _meta WHERE key = 'schemaVersion'").value).toBe("4");
+    expect(upgraded.get("SELECT value FROM _meta WHERE key = 'schemaVersion'").value).toBe("5");
   });
 
   it("existing DB at older schemaVersion → re-applies pending migrations on restart", async () => {
@@ -259,7 +261,7 @@ describe("Schema migrations", () => {
     vi.resetModules();
     const { getAdapter: restart } = await import("@/lib/db/driver.js");
     const upgraded = await restart();
-    expect(upgraded.get("SELECT value FROM _meta WHERE key = 'schemaVersion'").value).toBe("4");
+    expect(upgraded.get("SELECT value FROM _meta WHERE key = 'schemaVersion'").value).toBe("5");
     expect(upgraded.get("SELECT userId, name FROM apiKeys WHERE id = 'legacy-key'")).toEqual({
       userId: workspace.createdByUserId, name: "Old key",
     });

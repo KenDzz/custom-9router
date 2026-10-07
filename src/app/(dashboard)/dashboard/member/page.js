@@ -7,6 +7,17 @@ function formatNumber(value) {
   return new Intl.NumberFormat("en-US", { notation: Number(value) >= 100_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(Number(value || 0));
 }
 
+function formatExactNumber(value) {
+  return new Intl.NumberFormat("en-US").format(Number(value || 0));
+}
+
+function displayDateTime(value) {
+  return new Date(value).toLocaleString(undefined, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
+
 function maskKey(value) {
   if (!value) return "";
   return `${value.slice(0, 7)}${"•".repeat(Math.min(22, Math.max(8, value.length - 11)))}${value.slice(-4)}`;
@@ -34,6 +45,8 @@ export default function MemberDashboardPage() {
   const [visibleKeys, setVisibleKeys] = useState(new Set());
   const [deleteKey, setDeleteKey] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [redeemingReset, setRedeemingReset] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
 
   const load = async ({ quiet = false } = {}) => {
     quiet ? setRefreshing(true) : setLoading(true);
@@ -124,6 +137,20 @@ export default function MemberDashboardPage() {
     }
   };
 
+  const redeemReset = async () => {
+    setRedeemingReset(true);
+    try {
+      const data = await readResponse(await fetch("/api/member/reset-usage", { method: "POST" }));
+      setDashboard(data.dashboard);
+      setResetConfirmOpen(false);
+      setStatus({ type: "success", message: "Usage toward your daily limit reset. Request history is unchanged." });
+    } catch (error) {
+      setStatus({ type: "error", message: error.message });
+    } finally {
+      setRedeemingReset(false);
+    }
+  };
+
   const copy = async (value, message = "Copied") => {
     try {
       await navigator.clipboard.writeText(value);
@@ -177,6 +204,7 @@ export default function MemberDashboardPage() {
                 <span className="text-3xl font-bold tracking-tight text-text-main">{formatNumber(token?.usedTokens)}</span>
                 <span className="text-sm text-text-muted">/ {unlimited ? "Unlimited" : formatNumber(token.dailyTokenLimit)}</span>
               </div>
+              {!!token?.tokenGiftRemaining && <p className="mt-1 text-xs text-brand-500">+ {formatExactNumber(token.tokenGiftRemaining)} gift tokens available</p>}
             </div>
             <div className={`grid size-11 place-items-center rounded-[12px] ${token?.limitReached ? "bg-red-500/10 text-red-500" : "bg-brand-500/10 text-brand-500"}`}>
               <span className="material-symbols-outlined">speed</span>
@@ -195,7 +223,7 @@ export default function MemberDashboardPage() {
           {token?.limitReached && (
             <div className="mt-4 flex items-start gap-2 rounded-[10px] bg-red-500/10 px-3 py-2.5 text-sm text-red-600">
               <span className="material-symbols-outlined text-[18px]">block</span>
-              API requests are paused until the daily limit resets.
+              API requests are paused until the daily limit resets or a gift becomes active.
             </div>
           )}
         </Card>
@@ -205,6 +233,37 @@ export default function MemberDashboardPage() {
           <MiniStat label="Active API keys" value={`${dashboard?.keys.active || 0}/${dashboard?.keys.total || 0}`} icon="vpn_key" />
         </div>
       </div>
+
+      {(dashboard?.gifts?.length > 0 || token?.resetGiftsAvailable > 0 || token?.tokenGiftRemaining > 0) && (
+        <Card title="Your gifts" subtitle="Gifts stack while active; reset passes can be used one at a time" icon="redeem">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <MiniStat label="Gift tokens available" value={formatExactNumber(token?.tokenGiftRemaining)} icon="toll" />
+            <MiniStat label="Reset passes available" value={formatExactNumber(token?.resetGiftsAvailable)} icon="restart_alt" />
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-text-muted">Using a reset pass sets Used today to zero. Request history and spent gift tokens stay unchanged.</p>
+            <Button
+              size="sm"
+              variant="secondary"
+              icon="restart_alt"
+              disabled={unlimited || !token?.resetGiftsAvailable || !token?.usedTokens}
+              onClick={() => setResetConfirmOpen(true)}
+            >
+              Use reset pass
+            </Button>
+          </div>
+          <div className="mt-4 space-y-2">
+            {(dashboard.gifts || []).map((gift) => (
+              <div key={gift.id} className="rounded-[10px] bg-surface-2/50 p-3 text-xs text-text-muted">
+                <p className="font-medium text-text-main">
+                  {gift.type === "tokens" ? "One-time tokens" : "Reset passes"}: {formatExactNumber(gift.remainingAmount)} / {formatExactNumber(gift.amount)} left · {gift.status}
+                </p>
+                <p className="mt-1">{displayDateTime(gift.startsAt)} → {displayDateTime(gift.endsAt)}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {modelAccess && <Card title="My model access" subtitle={modelAccess.inheritsWorkspace ? "Inherited from your workspace" : "Assigned by your Owner, within the workspace allowance"} icon="tune">
         {modelAccess.mode === "all" ? <p className="text-sm text-text-muted">You can use all configured models and combos.</p> : <>
@@ -314,6 +373,16 @@ export default function MemberDashboardPage() {
         title="Delete API key"
         message={`Delete “${deleteKey?.name || "this key"}”? Applications using it will stop working immediately.`}
         confirmText="Delete key"
+      />
+      <ConfirmModal
+        isOpen={resetConfirmOpen}
+        onClose={() => setResetConfirmOpen(false)}
+        onConfirm={redeemReset}
+        loading={redeemingReset}
+        title="Use reset pass"
+        message="Use one reset pass to clear today's usage toward your daily limit? Your request history and spent gift tokens stay unchanged."
+        confirmText="Use one pass"
+        variant="primary"
       />
     </div>
   );

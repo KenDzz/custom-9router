@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Avatar, Badge, Button, Card, Input, Modal, Select } from "@/shared/components";
+import { Avatar, Badge, Button, Card, ConfirmModal, Input, Modal, Select } from "@/shared/components";
 import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
 import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
-import { formatDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
+import { formatDailyTokenLimitInput, normalizeDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -14,6 +14,28 @@ const ROLE_OPTIONS = [
 
 function formatNumber(value) {
   return new Intl.NumberFormat("en-US", { notation: Number(value) >= 1_000_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(Number(value || 0));
+}
+
+function localDateTimeValue(date) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function newGiftForm() {
+  const now = new Date();
+  return {
+    type: "tokens",
+    amount: "",
+    startsAt: localDateTimeValue(now),
+    endsAt: localDateTimeValue(new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)),
+  };
+}
+
+function displayDateTime(value) {
+  return new Date(value).toLocaleString(undefined, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
 }
 
 async function readResponse(response) {
@@ -34,6 +56,10 @@ export default function MembersPage() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState({ type: "", message: "" });
   const [form, setForm] = useState({ username: "", displayName: "", email: "", role: "member", dailyTokenLimit: "0", newPassword: "" });
+  const [giftForm, setGiftForm] = useState(newGiftForm);
+  const [gifting, setGifting] = useState(false);
+  const [resettingUsage, setResettingUsage] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
 
   const loadMembers = async () => {
     setLoading(true);
@@ -70,6 +96,7 @@ export default function MembersPage() {
     setProfile(null);
     setProfileLoading(true);
     setStatus({ type: "", message: "" });
+    setGiftForm(newGiftForm());
     setForm({
       username: member.username || "",
       displayName: member.displayName || "",
@@ -100,6 +127,53 @@ export default function MembersPage() {
     setSelected(null);
     setProfile(null);
     setStatus({ type: "", message: "" });
+    setResetConfirmOpen(false);
+  };
+
+  const grantGift = async () => {
+    if (!selected || !workspace) return;
+    const amount = giftForm.type === "tokens" ? parseDailyTokenLimit(giftForm.amount) : Number(giftForm.amount);
+    const max = giftForm.type === "tokens" ? 1_000_000_000_000 : 1_000;
+    const startsAt = new Date(giftForm.startsAt);
+    const endsAt = new Date(giftForm.endsAt);
+    if (!Number.isSafeInteger(amount) || amount < 1 || amount > max
+      || !Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+      setStatus({ type: "error", message: "Enter a valid amount and a finish time after the start time." });
+      return;
+    }
+    setGifting(true);
+    setStatus({ type: "", message: "" });
+    try {
+      await readResponse(await fetch(`/api/workspaces/${workspace.id}/members/${selected.userId}/gifts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: giftForm.type, amount, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() }),
+      }));
+      const updated = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members/${selected.userId}/profile`, { cache: "no-store" }));
+      setProfile(updated);
+      setGiftForm((current) => ({ ...current, amount: "" }));
+      setStatus({ type: "success", message: "Gift added to this member" });
+    } catch (error) {
+      setStatus({ type: "error", message: error.message });
+    } finally {
+      setGifting(false);
+    }
+  };
+
+  const resetUsage = async () => {
+    if (!selected || !workspace) return;
+    setResettingUsage(true);
+    try {
+      await readResponse(await fetch(`/api/workspaces/${workspace.id}/members/${selected.userId}/usage-reset`, { method: "POST" }));
+      const updated = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members/${selected.userId}/profile`, { cache: "no-store" }));
+      setProfile(updated);
+      setResetConfirmOpen(false);
+      setStatus({ type: "success", message: "Usage toward the daily limit reset; request history was preserved" });
+    } catch (error) {
+      setStatus({ type: "error", message: error.message });
+    } finally {
+      setResettingUsage(false);
+    }
   };
 
   const saveProfile = async (event) => {
@@ -238,8 +312,9 @@ export default function MembersPage() {
               </div>
 
               {profile?.dashboard && (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   <Metric label="Used today" value={formatNumber(profile.dashboard.tokenStatus.usedTokens)} icon="data_usage" />
+                  <Metric label="Total recorded today" value={formatNumber(profile.dashboard.tokenStatus.actualUsedToday)} icon="history" />
                   <Metric
                     label="Remaining today"
                     value={profile.dashboard.tokenStatus.remainingTokens === null
@@ -265,7 +340,7 @@ export default function MembersPage() {
                   <span className="material-symbols-outlined rounded-[10px] bg-brand-500/10 p-2 text-brand-500">speed</span>
                   <div>
                     <h4 className="font-semibold text-text-main">Daily token limit</h4>
-                    <p className="text-xs text-text-muted">Maximum tokens per day, not the remaining balance. Remaining today = limit − used today; usage counts input and output tokens across all keys owned by this member.</p>
+                    <p className="text-xs text-text-muted">Maximum base tokens per day, not the remaining balance. Reset usage sets Used today to zero; Total recorded today and request history stay unchanged. Remaining today also includes active gift tokens. Usage counts input and output tokens across all keys owned by this member.</p>
                   </div>
                 </div>
                 <DailyTokenLimitInput
@@ -274,6 +349,77 @@ export default function MembersPage() {
                   disabled={form.role === "owner"}
                 />
               </div>
+
+              {form.role !== "owner" && profile?.dashboard && (
+                <section className="rounded-[14px] border border-border-subtle p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="font-semibold text-text-main">Member gifts</h4>
+                      <p className="mt-1 text-xs text-text-muted">One-time tokens and reset passes stack while each gift is active. Resetting the quota counter keeps request history.</p>
+                    </div>
+                    <Button type="button" size="sm" variant="secondary" icon="restart_alt" disabled={!profile.dashboard.tokenStatus.dailyTokenLimit || !profile.dashboard.tokenStatus.usedTokens} onClick={() => setResetConfirmOpen(true)}>
+                      Reset usage now
+                    </Button>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <Metric label="Gift tokens remaining" value={formatDailyTokenLimitInput(profile.dashboard.tokenStatus.tokenGiftRemaining || 0)} icon="redeem" />
+                    <Metric label="Reset passes available" value={formatDailyTokenLimitInput(profile.dashboard.tokenStatus.resetGiftsAvailable || 0)} icon="restart_alt" />
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <Select
+                      label="Gift type"
+                      aria-label="Gift type"
+                      options={[{ value: "tokens", label: "One-time tokens" }, { value: "reset", label: "Usage reset passes" }]}
+                      value={giftForm.type}
+                      onChange={(event) => setGiftForm((current) => ({ ...current, type: event.target.value, amount: "" }))}
+                    />
+                    <Input
+                      label={giftForm.type === "tokens" ? "Token amount" : "Number of resets"}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={giftForm.type === "tokens" ? 17 : 4}
+                      placeholder={giftForm.type === "tokens" ? "e.g. 1,000,000" : "e.g. 2"}
+                      value={giftForm.type === "tokens" ? formatDailyTokenLimitInput(giftForm.amount) : giftForm.amount}
+                      onChange={(event) => {
+                        const digits = normalizeDailyTokenLimitInput(event.target.value);
+                        if (digits !== null) setGiftForm((current) => ({ ...current, amount: digits }));
+                      }}
+                    />
+                    <Input
+                      label="Starts at"
+                      type="datetime-local"
+                      step="1"
+                      value={giftForm.startsAt}
+                      onChange={(event) => setGiftForm((current) => ({ ...current, startsAt: event.target.value }))}
+                    />
+                    <Input
+                      label="Ends at"
+                      type="datetime-local"
+                      step="1"
+                      value={giftForm.endsAt}
+                      onChange={(event) => setGiftForm((current) => ({ ...current, endsAt: event.target.value }))}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-text-muted">Times use your local time zone, including seconds. Each gift is available from its start time until its end time.</p>
+                  <div className="mt-3 flex justify-end">
+                    <Button type="button" icon="redeem" loading={gifting} onClick={grantGift}>Give gift</Button>
+                  </div>
+                  {(profile.dashboard.gifts || []).length > 0 && (
+                    <div className="mt-5 space-y-2 border-t border-border-subtle pt-4">
+                      <h5 className="text-sm font-semibold text-text-main">Gift history</h5>
+                      {profile.dashboard.gifts.map((gift) => (
+                          <div key={gift.id} className="rounded-[10px] bg-surface-2/50 p-3 text-xs text-text-muted">
+                            <div className="flex flex-wrap justify-between gap-2">
+                              <span className="font-medium text-text-main">{gift.type === "tokens" ? "One-time tokens" : "Reset passes"}: {formatDailyTokenLimitInput(gift.remainingAmount)} / {formatDailyTokenLimitInput(gift.amount)} left</span>
+                              <span className="capitalize">{gift.status}</span>
+                            </div>
+                            <p className="mt-1">{displayDateTime(gift.startsAt)} → {displayDateTime(gift.endsAt)}</p>
+                          </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {profile && <ModelAccessPanel key={selected.userId} workspaceId={workspace.id} userId={selected.userId} />}
 
@@ -297,6 +443,16 @@ export default function MembersPage() {
           )}
         </Modal>
       )}
+      <ConfirmModal
+        isOpen={resetConfirmOpen}
+        onClose={() => setResetConfirmOpen(false)}
+        onConfirm={resetUsage}
+        title="Reset member usage"
+        message="Reset usage toward today's token limit now? Request history and spent gift tokens stay unchanged."
+        confirmText="Reset usage"
+        variant="primary"
+        loading={resettingUsage}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getWorkspaceContext, requireWorkspaceId } from "@/lib/workspaces/requestContext.js";
+import { chargeTokenGiftsForUsage } from "./memberGiftsRepo.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -311,6 +312,8 @@ async function persistRequestUsage(entry) {
         return;
       }
 
+      chargeTokenGiftsForUsage(db, workspaceId, record.userId, record.timestamp,
+        Number(promptTokens) + Number(completionTokens));
       db.run(
         `INSERT INTO usageHistory(workspaceId, userId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta)
          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

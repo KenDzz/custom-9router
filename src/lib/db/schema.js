@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -69,6 +69,8 @@ export const TABLES = {
       userId: "TEXT NOT NULL",
       role: "TEXT NOT NULL CHECK (role IN ('member', 'admin', 'owner'))",
       dailyTokenLimit: "INTEGER NOT NULL DEFAULT 0",
+      quotaResetAt: "TEXT",
+      quotaResetHistoryId: "INTEGER NOT NULL DEFAULT 0",
       createdAt: "TEXT NOT NULL",
       updatedAt: "TEXT NOT NULL",
     },
@@ -96,6 +98,23 @@ export const TABLES = {
     indexes: [
       "CREATE INDEX IF NOT EXISTS idx_workspace_invites_workspace ON workspaceInvites(workspaceId, createdAt DESC)",
       "CREATE INDEX IF NOT EXISTS idx_workspace_invites_email ON workspaceInvites(workspaceId, email)",
+    ],
+  },
+  workspaceMemberGifts: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      workspaceId: "TEXT NOT NULL",
+      userId: "TEXT NOT NULL",
+      type: "TEXT NOT NULL CHECK (type IN ('tokens', 'reset'))",
+      amount: "INTEGER NOT NULL CHECK (amount > 0)",
+      usedAmount: "INTEGER NOT NULL DEFAULT 0",
+      startsAt: "TEXT NOT NULL",
+      endsAt: "TEXT NOT NULL",
+      createdByUserId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_member_gifts_member_dates ON workspaceMemberGifts(workspaceId, userId, type, startsAt, endsAt)",
     ],
   },
   providerConnections: {

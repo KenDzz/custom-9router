@@ -23,14 +23,41 @@ value exists in the database. Daily usage counts input plus output tokens;
 cached-token metadata remains visible in the normal owner usage dashboard but
 is not charged a second time.
 
-In Workspace settings → Members, an owner can set a daily token limit while
-adding an existing user or creating an invitation. The field groups thousands
-as the owner types (for example, `1,250,000`); the API stores an integer.
-Invitation limits take effect when the invited user accepts the link. Admins
-can still add or invite users without setting a quota. Invitations created
-before this feature keep an existing member's quota, or give a new member the
-default unlimited quota. The owner can adjust the quota later on the Members
-page, where the same number format is used.
+In Workspace settings → Members, one form accepts a username or email. An
+existing account joins immediately; a new email address creates an invitation
+link. An unknown username needs an email address to invite. Owners can set a
+daily token limit in the same form, with thousands grouped while typing (for
+example, `1,250,000`). Invitation limits take effect when the invited user
+accepts the link. Admins can add or invite users without setting a quota.
+Invitations created before this feature keep an existing member's quota, or
+give a new member the default unlimited quota. The owner can adjust the quota
+later on the Members page, where the same number format is used.
+
+## Member gifts and usage reset
+
+An owner can grant either one-time extra tokens or usage reset passes from a
+member's profile. Each grant has an exact start and end date and time, including
+seconds. The browser enters local time and sends an ISO timestamp with its time
+zone resolved. A gift is active when `startsAt <= now < endsAt`; unused amounts
+expire at the end time. Grants of the same type stack. Active extra tokens are
+charged only after the member's base daily allowance is exhausted, and the
+soonest-expiring gift is spent first. Spent gift tokens are not restored by a
+usage reset or the next day. A member with an unlimited base limit does not
+spend gift tokens.
+
+Reset passes are redeemed one at a time from the member dashboard while active.
+The member needs positive usage counted toward the current day's limit to
+redeem one. The owner also has a separate immediate reset action that does not
+spend a gift pass. Either reset sets **Used today** (the quota counter) to zero
+and restores the base daily allowance. **Total recorded today**, request count,
+charts, and request history retain the actual usage. Token gifts already spent
+stay spent. The reset marker uses both a timestamp and the last usage row ID so
+requests recorded in the same millisecond are not counted again. The marker
+ceases to affect the counter at the next local midnight.
+
+The new table and reset-marker columns are added in migration 005. Gift grants
+and redemptions are bound to workspace membership. Only owners can grant gifts
+or perform direct resets; members can redeem only their own reset passes.
 
 ## Request flow
 
@@ -75,12 +102,16 @@ or foreign ownership falls back to the importing owner.
 ## Extension-owned surfaces
 
 - `src/lib/db/migrations/003-member-token-limits.js`
+- `src/lib/db/migrations/005-member-gifts.js`
 - `src/lib/db/repos/memberAccessRepo.js`
+- `src/lib/db/repos/memberGiftsRepo.js`
 - `src/lib/db/repos/memberManagementRepo.js`
 - `src/lib/workspaces/memberQuota.js`
 - `src/lib/workspaces/memberUsage.js`
 - `src/lib/workspaces/memberPolicy.js`
 - `src/app/api/member/**`
+- `src/app/api/workspaces/[id]/members/[userId]/gifts/route.js`
+- `src/app/api/workspaces/[id]/members/[userId]/usage-reset/route.js`
 - `src/app/api/workspaces/[id]/members/[userId]/profile/route.js`
 - `src/app/(dashboard)/dashboard/member/page.js`
 - `src/app/(dashboard)/dashboard/members/page.js`
@@ -91,10 +122,11 @@ or foreign ownership falls back to the importing owner.
 
 Only these existing files contain small hooks for this feature:
 
-- `src/lib/db/schema.js`: three additive columns and two indexes.
-- `src/lib/db/migrations/index.js`: registers migration 003.
+- `src/lib/db/schema.js`: additive member columns, gift table, and indexes.
+- `src/lib/db/migrations/index.js`: registers migrations 003 and 005.
 - `src/lib/workspaces/requestContext.js`: centralized quota check.
-- `src/lib/db/repos/usageRepo.js`: stamps the trusted context `userId`.
+- `src/lib/db/repos/usageRepo.js`: stamps the trusted context `userId` and
+  spends active token gifts in the same transaction as usage history.
 - `src/lib/db/repos/apiKeysRepo.js`: key ownership and optional owner filters.
 - `src/dashboardGuard.js`: owner/member dashboard allow-list.
 - `src/shared/components/Sidebar.js`: role-specific navigation.
