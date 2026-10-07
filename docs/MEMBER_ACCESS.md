@@ -9,7 +9,7 @@ merged without reapplying business rules throughout the request pipeline.
 | Capability | Owner | Member / Admin |
 | --- | --- | --- |
 | Existing 9Router dashboard and settings | Full | Hidden and server-blocked |
-| Workspace member management | Yes | No |
+| Workspace member management | Yes | Admin only; member no |
 | View/edit member profile and reset password | Yes | No |
 | Set per-member daily token limit | Yes | No |
 | Set workspace/member allowed models and combos | Yes | No |
@@ -22,6 +22,12 @@ merged without reapplying business rules throughout the request pipeline.
 value exists in the database. Daily usage counts input plus output tokens;
 cached-token metadata remains visible in the normal owner usage dashboard but
 is not charged a second time.
+
+In Workspace settings → Members, an owner can set a daily token limit while
+adding an existing user. The field groups thousands as the owner types (for
+example, `1,250,000`); the API stores an integer. Admins can still add users
+without setting a quota. The owner can adjust the quota later on the Members
+page, where the same number format is used.
 
 ## Request flow
 

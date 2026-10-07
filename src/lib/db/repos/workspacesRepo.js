@@ -136,13 +136,20 @@ export async function countOwners(workspaceId) {
   return db.get(`SELECT COUNT(*) AS c FROM workspaceMembers WHERE workspaceId = ? AND role = ?`, [workspaceId, WORKSPACE_ROLES.OWNER])?.c ?? 0;
 }
 
-export async function addMember(workspaceId, userId, role) {
+export async function addMember(workspaceId, userId, role, options = {}) {
   const db = await getAdapter();
   const now = new Date().toISOString();
+  const hasLimit = options.dailyTokenLimit !== undefined;
+  const limit = hasLimit ? options.dailyTokenLimit : 0;
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000_000_000_000) {
+    throw new Error("daily token limit must be an integer from 0 to 1,000,000,000,000");
+  }
   db.run(
-    `INSERT INTO workspaceMembers(workspaceId, userId, role, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?)
-     ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role, updatedAt = excluded.updatedAt`,
-    [workspaceId, userId, role, now, now]
+    `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)
+     ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role,
+       dailyTokenLimit = ${hasLimit ? "excluded.dailyTokenLimit" : "workspaceMembers.dailyTokenLimit"},
+       updatedAt = excluded.updatedAt`,
+    [workspaceId, userId, role, limit, now, now]
   );
 }
 

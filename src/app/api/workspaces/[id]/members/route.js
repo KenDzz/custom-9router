@@ -18,14 +18,21 @@ export async function GET(request, { params }) {
 // never as owner: ownership is granted via updateMemberRole by an existing owner.
 export async function POST(request, { params }) {
   const { id } = await params;
-  const { error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
+  const { error, member } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
   if (error) return error;
-  const { identifier, role = WORKSPACE_ROLES.MEMBER } = await request.json();
+  const { identifier, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = await request.json();
   if (!isWorkspaceRole(role) || role === WORKSPACE_ROLES.OWNER) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
   }
+  if (dailyTokenLimit !== undefined && member.role !== WORKSPACE_ROLES.OWNER) {
+    return NextResponse.json({ error: "Owner access required to set a daily token limit" }, { status: 403 });
+  }
+  const limit = dailyTokenLimit;
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000_000_000_000)) {
+    return NextResponse.json({ error: "Daily token limit must be an integer from 0 to 1,000,000,000,000" }, { status: 400 });
+  }
   const user = await getUserByIdentifier(identifier);
   if (!user) return NextResponse.json({ error: "user not found" }, { status: 404 });
-  await addMember(id, user.id, role);
+  await addMember(id, user.id, role, limit === undefined ? undefined : { dailyTokenLimit: limit });
   return NextResponse.json({ success: true }, { status: 201 });
 }

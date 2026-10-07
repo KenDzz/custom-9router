@@ -43,6 +43,25 @@ afterAll(async () => {
 });
 
 describe("workspace member daily token limits", () => {
+  it("sets a quota when adding a member and preserves it when no new quota is supplied", async () => {
+    const added = await users.createUser({ username: "new-limited-member", email: "new-limited@example.com" });
+    await workspaces.addMember(workspace.id, added.id, "member", { dailyTokenLimit: 1_250_000 });
+    expect((await workspaces.getMember(workspace.id, added.id)).dailyTokenLimit).toBe(1_250_000);
+    expect(await memberAccess.getMemberTokenStatus(workspace.id, added.id)).toMatchObject({
+      dailyTokenLimit: 1_250_000,
+      remainingTokens: 1_250_000,
+    });
+
+    await workspaces.addMember(workspace.id, added.id, "admin");
+    expect(await workspaces.getMember(workspace.id, added.id)).toMatchObject({
+      role: "admin",
+      dailyTokenLimit: 1_250_000,
+    });
+
+    await workspaces.addMember(workspace.id, added.id, "member", { dailyTokenLimit: 0 });
+    expect((await workspaces.getMember(workspace.id, added.id)).dailyTokenLimit).toBe(0);
+  });
+
   it("attributes API keys to their creating member", async () => {
     const key = await requestContext.runWithWorkspace(
       { workspaceId: workspace.id, userId: member.id },

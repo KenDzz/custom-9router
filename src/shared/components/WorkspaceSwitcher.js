@@ -8,6 +8,8 @@ import Button from "./Button";
 import Input from "./Input";
 import Modal, { ConfirmModal } from "./Modal";
 import Select from "./Select";
+import DailyTokenLimitInput from "./workspaces/DailyTokenLimitInput";
+import { formatDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -144,7 +146,7 @@ function WorkspaceManagerModal({
   const [action, setAction] = useState("");
   const [status, setStatus] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [memberForm, setMemberForm] = useState({ identifier: "", role: "member" });
+  const [memberForm, setMemberForm] = useState({ identifier: "", role: "member", dailyTokenLimit: "0" });
   const [inviteForm, setInviteForm] = useState({ email: "", role: "member" });
   const [inviteLink, setInviteLink] = useState("");
 
@@ -212,15 +214,20 @@ function WorkspaceManagerModal({
   const addMember = async (event) => {
     event.preventDefault();
     if (!memberForm.identifier.trim()) return;
+    const limit = isOwner ? parseDailyTokenLimit(memberForm.dailyTokenLimit) : undefined;
+    if (isOwner && limit === null) {
+      setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
+      return;
+    }
     await runAction("add-member", async () => {
       await readResponse(await fetch(`/api/workspaces/${workspace.id}/members`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: memberForm.identifier.trim(), role: memberForm.role }),
+        body: JSON.stringify({ identifier: memberForm.identifier.trim(), role: memberForm.role, dailyTokenLimit: limit }),
       }));
       const data = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members`, { cache: "no-store" }));
       setMembers(data.members || []);
-      setMemberForm({ identifier: "", role: "member" });
+      setMemberForm({ identifier: "", role: "member", dailyTokenLimit: "0" });
     }, "Member added to this workspace");
   };
 
@@ -404,6 +411,12 @@ function WorkspaceManagerModal({
                         value={memberForm.identifier}
                         onChange={(event) => setMemberForm((current) => ({ ...current, identifier: event.target.value }))}
                       />
+                      {isOwner && (
+                        <DailyTokenLimitInput
+                          value={memberForm.dailyTokenLimit}
+                          onChange={(dailyTokenLimit) => setMemberForm((current) => ({ ...current, dailyTokenLimit }))}
+                        />
+                      )}
                       <div className="flex gap-2">
                         <Select
                           aria-label="Existing user role"
@@ -412,7 +425,7 @@ function WorkspaceManagerModal({
                           onChange={(event) => setMemberForm((current) => ({ ...current, role: event.target.value }))}
                           className="flex-1"
                         />
-                        <Button type="submit" icon="add" loading={action === "add-member"} disabled={!memberForm.identifier.trim()}>
+                        <Button type="submit" icon="add" loading={action === "add-member"} disabled={!memberForm.identifier.trim() || (isOwner && parseDailyTokenLimit(memberForm.dailyTokenLimit) === null)}>
                           Add
                         </Button>
                       </div>
@@ -495,6 +508,11 @@ function WorkspaceManagerModal({
                               {isSelf && <Badge size="sm">You</Badge>}
                             </div>
                             <p className="truncate text-xs text-text-muted">{member.email || `@${member.username}`}</p>
+                            {isOwner && member.role !== "owner" && (
+                              <p className="text-xs text-text-muted">
+                                Daily limit: {member.dailyTokenLimit ? `${formatDailyTokenLimitInput(member.dailyTokenLimit)} tokens` : "Unlimited"}
+                              </p>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center justify-end gap-2 pl-11 sm:pl-0">

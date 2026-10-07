@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, Button, Input } from "@/shared/components";
 
 export default function LoginPage() {
-  const [identifier, setIdentifier] = useState("admin");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [resetHint, setResetHint] = useState("");
@@ -198,7 +198,7 @@ export default function LoginPage() {
                   <label className="text-sm font-medium">Username or email</label>
                   <Input
                     type="text"
-                    placeholder="admin"
+                    placeholder="Enter username or email"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
                     required

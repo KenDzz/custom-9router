@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Avatar, Badge, Button, Card, Input, Modal, Select } from "@/shared/components";
 import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
+import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
+import { parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -103,6 +105,11 @@ export default function MembersPage() {
   const saveProfile = async (event) => {
     event.preventDefault();
     if (!selected || !workspace) return;
+    const limit = form.role === "owner" ? 0 : parseDailyTokenLimit(form.dailyTokenLimit);
+    if (limit === null) {
+      setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
+      return;
+    }
     setSaving(true);
     setStatus({ type: "", message: "" });
     try {
@@ -114,7 +121,7 @@ export default function MembersPage() {
           displayName: form.displayName,
           email: form.email,
           role: form.role,
-          dailyTokenLimit: form.role === "owner" ? 0 : Number(form.dailyTokenLimit || 0),
+          dailyTokenLimit: limit,
           ...(form.newPassword ? { newPassword: form.newPassword } : {}),
         }),
       }));
@@ -254,17 +261,10 @@ export default function MembersPage() {
                     <p className="text-xs text-text-muted">Counts input and output tokens across all keys owned by this member.</p>
                   </div>
                 </div>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  max="1000000000000"
-                  label="Tokens per day"
-                  aria-label="Tokens per day"
+                <DailyTokenLimitInput
                   value={form.role === "owner" ? "0" : form.dailyTokenLimit}
-                  onChange={(event) => setForm((current) => ({ ...current, dailyTokenLimit: event.target.value }))}
+                  onChange={(dailyTokenLimit) => setForm((current) => ({ ...current, dailyTokenLimit }))}
                   disabled={form.role === "owner"}
-                  hint={form.role === "owner" ? "Owners always have unlimited usage." : "Use 0 for unlimited usage."}
                 />
               </div>
 
