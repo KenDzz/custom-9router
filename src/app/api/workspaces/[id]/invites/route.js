@@ -16,9 +16,9 @@ export async function GET(request, { params }) {
 
 export async function POST(request, { params }) {
   const { id } = await params;
-  const { user, error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
+  const { user, member, error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
   if (error) return error;
-  const { email, role = WORKSPACE_ROLES.MEMBER } = await request.json();
+  const { email, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = await request.json();
   if (!email || typeof email !== "string") {
     return NextResponse.json({ error: "email required" }, { status: 400 });
   }
@@ -26,6 +26,12 @@ export async function POST(request, { params }) {
   if (!isWorkspaceRole(role) || role === WORKSPACE_ROLES.OWNER) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
   }
-  const invite = await createInvite(id, email, role, user.id);
+  if (dailyTokenLimit !== undefined && member.role !== WORKSPACE_ROLES.OWNER) {
+    return NextResponse.json({ error: "Owner access required to set a daily token limit" }, { status: 403 });
+  }
+  if (dailyTokenLimit !== undefined && (!Number.isSafeInteger(dailyTokenLimit) || dailyTokenLimit < 0 || dailyTokenLimit > 1_000_000_000_000)) {
+    return NextResponse.json({ error: "Daily token limit must be an integer from 0 to 1,000,000,000,000" }, { status: 400 });
+  }
+  const invite = await createInvite(id, email, role, user.id, dailyTokenLimit === undefined ? undefined : { dailyTokenLimit });
   return NextResponse.json({ invite }, { status: 201 });
 }

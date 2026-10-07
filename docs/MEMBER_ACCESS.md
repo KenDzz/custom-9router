@@ -24,9 +24,12 @@ cached-token metadata remains visible in the normal owner usage dashboard but
 is not charged a second time.
 
 In Workspace settings → Members, an owner can set a daily token limit while
-adding an existing user. The field groups thousands as the owner types (for
-example, `1,250,000`); the API stores an integer. Admins can still add users
-without setting a quota. The owner can adjust the quota later on the Members
+adding an existing user or creating an invitation. The field groups thousands
+as the owner types (for example, `1,250,000`); the API stores an integer.
+Invitation limits take effect when the invited user accepts the link. Admins
+can still add or invite users without setting a quota. Invitations created
+before this feature keep an existing member's quota, or give a new member the
+default unlimited quota. The owner can adjust the quota later on the Members
 page, where the same number format is used.
 
 ## Request flow

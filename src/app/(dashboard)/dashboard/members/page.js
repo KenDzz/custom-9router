@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Avatar, Badge, Button, Card, Input, Modal, Select } from "@/shared/components";
 import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
 import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
-import { parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
+import { formatDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -238,8 +238,15 @@ export default function MembersPage() {
               </div>
 
               {profile?.dashboard && (
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Metric label="Used today" value={formatNumber(profile.dashboard.tokenStatus.usedTokens)} icon="data_usage" />
+                  <Metric
+                    label="Remaining today"
+                    value={profile.dashboard.tokenStatus.remainingTokens === null
+                      ? "Unlimited"
+                      : formatDailyTokenLimitInput(profile.dashboard.tokenStatus.remainingTokens)}
+                    icon="hourglass_bottom"
+                  />
                   <Metric label="Requests today" value={formatNumber(profile.dashboard.tokenStatus.requests)} icon="bolt" />
                   <Metric label="Active keys" value={`${profile.dashboard.keys.active}/${profile.dashboard.keys.total}`} icon="vpn_key" />
                 </div>
@@ -258,7 +265,7 @@ export default function MembersPage() {
                   <span className="material-symbols-outlined rounded-[10px] bg-brand-500/10 p-2 text-brand-500">speed</span>
                   <div>
                     <h4 className="font-semibold text-text-main">Daily token limit</h4>
-                    <p className="text-xs text-text-muted">Counts input and output tokens across all keys owned by this member.</p>
+                    <p className="text-xs text-text-muted">Maximum tokens per day, not the remaining balance. Remaining today = limit − used today; usage counts input and output tokens across all keys owned by this member.</p>
                   </div>
                 </div>
                 <DailyTokenLimitInput

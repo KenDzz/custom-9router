@@ -27,6 +27,7 @@ export async function GET(request) {
     invite: {
       email: invite.email,
       role: invite.role,
+      dailyTokenLimit: invite.dailyTokenLimit,
       expiresAt: invite.expiresAt,
       workspaceName: workspace?.name || "Workspace",
     },

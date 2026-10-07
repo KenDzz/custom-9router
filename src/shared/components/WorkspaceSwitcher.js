@@ -147,7 +147,7 @@ function WorkspaceManagerModal({
   const [status, setStatus] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [memberForm, setMemberForm] = useState({ identifier: "", role: "member", dailyTokenLimit: "0" });
-  const [inviteForm, setInviteForm] = useState({ email: "", role: "member" });
+  const [inviteForm, setInviteForm] = useState({ email: "", role: "member", dailyTokenLimit: "0" });
   const [inviteLink, setInviteLink] = useState("");
 
   const canManage = workspace?.role === "owner" || workspace?.role === "admin";
@@ -234,16 +234,21 @@ function WorkspaceManagerModal({
   const inviteMember = async (event) => {
     event.preventDefault();
     if (!inviteForm.email.trim()) return;
+    const limit = isOwner ? parseDailyTokenLimit(inviteForm.dailyTokenLimit) : undefined;
+    if (isOwner && limit === null) {
+      setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
+      return;
+    }
     await runAction("invite", async () => {
       const data = await readResponse(await fetch(`/api/workspaces/${workspace.id}/invites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteForm.email.trim(), role: inviteForm.role }),
+        body: JSON.stringify({ email: inviteForm.email.trim(), role: inviteForm.role, dailyTokenLimit: limit }),
       }));
       const link = `${window.location.origin}/invite?token=${encodeURIComponent(data.invite.token)}`;
       setInviteLink(link);
       setInvites((current) => [data.invite, ...current]);
-      setInviteForm({ email: "", role: "member" });
+      setInviteForm({ email: "", role: "member", dailyTokenLimit: "0" });
     }, "Invitation created — copy the link and send it to the member");
   };
 
@@ -443,6 +448,12 @@ function WorkspaceManagerModal({
                         value={inviteForm.email}
                         onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
                       />
+                      {isOwner && (
+                        <DailyTokenLimitInput
+                          value={inviteForm.dailyTokenLimit}
+                          onChange={(dailyTokenLimit) => setInviteForm((current) => ({ ...current, dailyTokenLimit }))}
+                        />
+                      )}
                       <div className="flex gap-2">
                         <Select
                           aria-label="Invitation role"
@@ -451,7 +462,7 @@ function WorkspaceManagerModal({
                           onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value }))}
                           className="flex-1"
                         />
-                        <Button type="submit" icon="send" loading={action === "invite"} disabled={!inviteForm.email.trim()}>
+                        <Button type="submit" icon="send" loading={action === "invite"} disabled={!inviteForm.email.trim() || (isOwner && parseDailyTokenLimit(inviteForm.dailyTokenLimit) === null)}>
                           Invite
                         </Button>
                       </div>
@@ -562,6 +573,11 @@ function WorkspaceManagerModal({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-text-main">{invite.email}</p>
                           <p className="text-xs text-text-muted">Expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
+                          {isOwner && invite.dailyTokenLimit !== null && (
+                            <p className="text-xs text-text-muted">
+                              Daily limit: {invite.dailyTokenLimit ? `${formatDailyTokenLimitInput(invite.dailyTokenLimit)} tokens` : "Unlimited"}
+                            </p>
+                          )}
                         </div>
                         <RoleBadge role={invite.role} />
                         <button

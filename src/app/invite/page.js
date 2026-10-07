@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Badge, Button, Card, Input } from "@/shared/components";
+import { formatDailyTokenLimitInput } from "@/shared/utils/dailyTokenLimit";
 
 function InviteContent() {
   const searchParams = useSearchParams();
@@ -106,6 +107,13 @@ function InviteContent() {
                       </Badge>
                     </div>
                     <p className="mt-1 truncate text-xs text-text-muted">Invited as {preview.invite.email}</p>
+                    {preview.invite.dailyTokenLimit != null && (
+                      <p className="mt-1 text-xs text-text-muted">
+                        Daily token limit: {preview.invite.dailyTokenLimit
+                          ? formatDailyTokenLimitInput(preview.invite.dailyTokenLimit)
+                          : "Unlimited"}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

@@ -38,6 +38,7 @@ function rowToInvite(row) {
     workspaceId: row.workspaceId,
     email: row.email,
     role: row.role,
+    dailyTokenLimit: row.dailyTokenLimit == null ? null : Number(row.dailyTokenLimit),
     invitedByUserId: row.invitedByUserId,
     expiresAt: row.expiresAt,
     acceptedAt: row.acceptedAt,
@@ -203,15 +204,21 @@ export async function removeMember(workspaceId, userId) {
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-export async function createInvite(workspaceId, email, role, invitedByUserId) {
+export async function createInvite(workspaceId, email, role, invitedByUserId, options = {}) {
   const db = await getAdapter();
   const now = new Date().toISOString();
   const token = crypto.randomBytes(32).toString("base64url");
+  const hasLimit = options.dailyTokenLimit !== undefined;
+  const dailyTokenLimit = hasLimit ? options.dailyTokenLimit : null;
+  if (hasLimit && (!Number.isSafeInteger(dailyTokenLimit) || dailyTokenLimit < 0 || dailyTokenLimit > 1_000_000_000_000)) {
+    throw new Error("daily token limit must be an integer from 0 to 1,000,000,000,000");
+  }
   const invite = {
     id: uuidv4(),
     workspaceId,
     email: normalizeIdentifier(email),
     role,
+    dailyTokenLimit,
     tokenHash: hashToken(token),
     invitedByUserId,
     expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString(),
@@ -219,9 +226,9 @@ export async function createInvite(workspaceId, email, role, invitedByUserId) {
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO workspaceInvites(id, workspaceId, email, role, tokenHash, invitedByUserId, expiresAt, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [invite.id, invite.workspaceId, invite.email, invite.role, invite.tokenHash, invite.invitedByUserId, invite.expiresAt, now, now]
+    `INSERT INTO workspaceInvites(id, workspaceId, email, role, dailyTokenLimit, tokenHash, invitedByUserId, expiresAt, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [invite.id, invite.workspaceId, invite.email, invite.role, dailyTokenLimit, invite.tokenHash, invite.invitedByUserId, invite.expiresAt, now, now]
   );
   return { ...rowToInvite(invite), token };
 }
@@ -256,9 +263,10 @@ export async function acceptInvite(inviteId, userId) {
     }
     db.run(`UPDATE workspaceInvites SET acceptedAt = ? WHERE id = ?`, [now, inviteId]);
     db.run(
-      `INSERT INTO workspaceMembers(workspaceId, userId, role, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?)
-       ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role, updatedAt = excluded.updatedAt`,
-      [row.workspaceId, userId, row.role, now, now]
+      `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)
+       ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role,
+         dailyTokenLimit = COALESCE(?, workspaceMembers.dailyTokenLimit), updatedAt = excluded.updatedAt`,
+      [row.workspaceId, userId, row.role, row.dailyTokenLimit ?? 0, now, now, row.dailyTokenLimit]
     );
   });
 }
