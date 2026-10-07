@@ -17,7 +17,7 @@ const CREDENTIALED_PROVIDERS = new Set(
     .map(([id]) => id)
 );
 
-export async function handleStt(request) {
+export async function handleStt(request, { trustedDashboardProbe = false } = {}) {
   let formData;
   try {
     formData = await request.formData();
@@ -29,7 +29,7 @@ export async function handleStt(request) {
   log.request("POST", `/v1/audio/transcriptions | ${modelStr}`);
 
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !trustedDashboardProbe) {
     const apiKey = extractApiKey(request);
     if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
     const valid = await isValidApiKey(apiKey);

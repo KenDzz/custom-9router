@@ -28,7 +28,7 @@ import { getProjectIdForConnection } from "open-sse/services/projectId.js";
  * Supports: OpenAI, Claude, Gemini, OpenAI Responses API formats
  * Format detection and translation handled by translator
  */
-export async function handleChat(request, clientRawRequest = null) {
+export async function handleChat(request, clientRawRequest = null, { trustedDashboardProbe = false } = {}) {
   let body;
   try {
     body = await request.json();
@@ -64,7 +64,7 @@ export async function handleChat(request, clientRawRequest = null) {
 
   // Enforce API key if enabled in settings
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !trustedDashboardProbe) {
     if (!apiKey) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");

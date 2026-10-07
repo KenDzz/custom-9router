@@ -50,12 +50,13 @@ async function getInternalHeaders() {
   return headers;
 }
 
-export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
-  const headers = await getInternalHeaders();
+export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`, options = {}) {
+  const headers = options.headers || await getInternalHeaders();
+  const execute = options.execute || fetch;
   const start = Date.now();
 
   if (kind === "embedding") {
-    const res = await fetch(`${baseUrl}/api/v1/embeddings`, {
+    const res = await execute(`${baseUrl}/api/v1/embeddings`, {
       method: "POST",
       headers,
       body: JSON.stringify({ model, input: "test" }),
@@ -78,7 +79,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
   }
 
   if (kind === "image") {
-    const res = await fetch(`${baseUrl}/api/v1/images/generations`, {
+    const res = await execute(`${baseUrl}/api/v1/images/generations`, {
       method: "POST",
       headers,
       body: JSON.stringify({ model, prompt: "test" }),
@@ -107,7 +108,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     form.append("file", sampleAudio, "test.wav");
     form.append("model", model);
 
-    const res = await fetch(`${baseUrl}/api/v1/audio/transcriptions`, {
+    const res = await execute(`${baseUrl}/api/v1/audio/transcriptions`, {
       method: "POST",
       headers: Object.fromEntries(Object.entries(headers).filter(([key]) => key.toLowerCase() !== "content-type")),
       body: form,
@@ -130,7 +131,7 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     return { ok: true, latencyMs, error: null, status: res.status };
   }
 
-  const res = await fetch(`${baseUrl}/api/v1/chat/completions`, {
+  const res = await execute(`${baseUrl}/api/v1/chat/completions`, {
     method: "POST",
     headers,
     body: JSON.stringify({

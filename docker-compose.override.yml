@@ -1,0 +1,7 @@
+# Build the checked-out source for local Docker Compose deployments.
+# The published image in docker-compose.yml does not include local fixes.
+services:
+  9router:
+    image: 9router:local
+    build:
+      context: .

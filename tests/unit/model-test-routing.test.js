@@ -1,194 +1,124 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  getApiKeys: vi.fn(),
-  getConsistentMachineId: vi.fn(),
+  withDashboardWorkspace: vi.fn(),
+  initTranslators: vi.fn(),
+  handleChat: vi.fn(),
+  handleEmbeddings: vi.fn(),
+  handleImageGeneration: vi.fn(),
+  handleStt: vi.fn(),
 }));
 
-vi.mock("@/lib/localDb", () => ({
-  getApiKeys: mocks.getApiKeys,
+vi.mock("@/lib/workspaces/requestContext.js", () => ({
+  withDashboardWorkspace: mocks.withDashboardWorkspace,
 }));
-
-vi.mock("@/shared/utils/machineId", () => ({
-  getConsistentMachineId: mocks.getConsistentMachineId,
-}));
-
+vi.mock("open-sse/translator/index.js", () => ({ initTranslators: mocks.initTranslators }));
+vi.mock("@/sse/handlers/chat.js", () => ({ handleChat: mocks.handleChat }));
+vi.mock("@/sse/handlers/embeddings.js", () => ({ handleEmbeddings: mocks.handleEmbeddings }));
+vi.mock("@/sse/handlers/imageGeneration.js", () => ({ handleImageGeneration: mocks.handleImageGeneration }));
+vi.mock("@/sse/handlers/stt.js", () => ({ handleStt: mocks.handleStt }));
 vi.mock("next/server", () => ({
   NextResponse: {
     json(body, init = {}) {
-      return new Response(JSON.stringify(body), {
-        status: init.status || 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return Response.json(body, { status: init.status || 200 });
     },
   },
 }));
 
 const originalFetch = global.fetch;
 
-describe("model test route kind routing", () => {
+function jsonResponse(body, status = 200) {
+  return Response.json(body, { status });
+}
+
+async function testModel(model, kind) {
+  const { POST } = await import("../../src/app/api/models/test/route.js");
+  const request = new Request("http://localhost/api/models/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, kind }),
+  });
+  const response = await POST(request);
+  return response.json();
+}
+
+describe("dashboard model tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getApiKeys.mockResolvedValue([{ key: "sk-internal", isActive: true }]);
-    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      created: 1,
-      data: [{ b64_json: "abc" }],
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    mocks.withDashboardWorkspace.mockImplementation((_request, _role, callback) => callback());
+    global.fetch = vi.fn(() => { throw new Error("A dashboard probe must not make an HTTP self-request"); });
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
   });
 
-  it("routes image model tests to /api/v1/images/generations", async () => {
-    const { POST } = await import("../../src/app/api/models/test/route.js");
+  it("tests a chat model in process without an API key", async () => {
+    mocks.handleChat.mockResolvedValue(jsonResponse({ choices: [{ message: { content: "ok" } }] }));
 
-    const req = new Request("http://localhost/api/models/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "hf/black-forest-labs/FLUX.1-schnell",
-        kind: "image",
-      }),
-    });
+    const result = await testModel("cc/claude-sonnet-5-5", "llm");
 
-    const res = await POST(req);
-    const body = await res.json();
-
-    expect(body.ok).toBe(true);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/v1/images/generations"),
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          model: "hf/black-forest-labs/FLUX.1-schnell",
-          prompt: "test",
-        }),
-      })
-    );
+    expect(result.ok).toBe(true);
+    expect(mocks.withDashboardWorkspace.mock.calls[0][1]).toBe("owner");
+    const [probeRequest, clientRawRequest, options] = mocks.handleChat.mock.calls[0];
+    expect(new URL(probeRequest.url).pathname).toBe("/api/v1/chat/completions");
+    expect(probeRequest.headers.has("Authorization")).toBe(false);
+    expect(await probeRequest.json()).toMatchObject({ model: "cc/claude-sonnet-5-5" });
+    expect(clientRawRequest).toBeNull();
+    expect(options).toEqual({ trustedDashboardProbe: true });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("routes embedding model tests to /api/v1/embeddings", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: [{ embedding: [0.1, 0.2] }],
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+  it("routes image models to the image handler", async () => {
+    mocks.handleImageGeneration.mockResolvedValue(jsonResponse({ data: [{ b64_json: "abc" }] }));
 
-    const { POST } = await import("../../src/app/api/models/test/route.js");
+    const result = await testModel("hf/black-forest-labs/FLUX.1-schnell", "image");
 
-    const req = new Request("http://localhost/api/models/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "voyage/voyage-3-large",
-        kind: "embedding",
-      }),
-    });
-
-    const res = await POST(req);
-    const body = await res.json();
-
-    expect(body.ok).toBe(true);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/v1/embeddings"),
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          model: "voyage/voyage-3-large",
-          input: "test",
-        }),
-      })
-    );
+    expect(result.ok).toBe(true);
+    const [request, options] = mocks.handleImageGeneration.mock.calls[0];
+    expect(new URL(request.url).pathname).toBe("/api/v1/images/generations");
+    expect(await request.json()).toEqual({ model: "hf/black-forest-labs/FLUX.1-schnell", prompt: "test" });
+    expect(options).toEqual({ trustedDashboardProbe: true });
   });
 
-  it("fails embedding model tests when provider returns no embedding data", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: [{ embedding: null }],
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+  it("routes embedding models to the embedding handler", async () => {
+    mocks.handleEmbeddings.mockResolvedValue(jsonResponse({ data: [{ embedding: [0.1, 0.2] }] }));
 
-    const { POST } = await import("../../src/app/api/models/test/route.js");
+    const result = await testModel("voyage/voyage-3-large", "embedding");
 
-    const req = new Request("http://localhost/api/models/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "voyage/voyage-3-large",
-        kind: "embedding",
-      }),
-    });
-
-    const res = await POST(req);
-    const body = await res.json();
-
-    expect(body.ok).toBe(false);
-    expect(body.error).toBe("Provider returned no embedding data");
+    expect(result.ok).toBe(true);
+    const [request, options] = mocks.handleEmbeddings.mock.calls[0];
+    expect(new URL(request.url).pathname).toBe("/api/v1/embeddings");
+    expect(await request.json()).toEqual({ model: "voyage/voyage-3-large", input: "test" });
+    expect(options).toEqual({ trustedDashboardProbe: true });
   });
 
-  it("routes stt model tests to /api/v1/audio/transcriptions", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      text: "test",
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+  it("reports empty embedding responses", async () => {
+    mocks.handleEmbeddings.mockResolvedValue(jsonResponse({ data: [{ embedding: null }] }));
 
-    const { POST } = await import("../../src/app/api/models/test/route.js");
+    const result = await testModel("voyage/voyage-3-large", "embedding");
 
-    const req = new Request("http://localhost/api/models/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "hf/openai/whisper-small",
-        kind: "stt",
-      }),
-    });
-
-    const res = await POST(req);
-    const body = await res.json();
-
-    expect(body.ok).toBe(true);
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/v1/audio/transcriptions"),
-      expect.objectContaining({
-        method: "POST",
-        body: expect.any(FormData),
-      })
-    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("Provider returned no embedding data");
   });
 
-  it("returns formatted HTTP errors for non-2xx embedding responses", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      error: { message: "bad upstream" },
-    }), {
-      status: 502,
-      headers: { "Content-Type": "application/json" },
-    }));
+  it("routes speech transcription models to the STT handler", async () => {
+    mocks.handleStt.mockResolvedValue(jsonResponse({ text: "test" }));
 
-    const { POST } = await import("../../src/app/api/models/test/route.js");
+    const result = await testModel("hf/openai/whisper-small", "stt");
 
-    const req = new Request("http://localhost/api/models/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "voyage/voyage-3-large",
-        kind: "embedding",
-      }),
-    });
+    expect(result.ok).toBe(true);
+    const [request, options] = mocks.handleStt.mock.calls[0];
+    expect(new URL(request.url).pathname).toBe("/api/v1/audio/transcriptions");
+    expect((await request.formData()).get("model")).toBe("hf/openai/whisper-small");
+    expect(options).toEqual({ trustedDashboardProbe: true });
+  });
 
-    const res = await POST(req);
-    const body = await res.json();
+  it("preserves upstream HTTP errors", async () => {
+    mocks.handleEmbeddings.mockResolvedValue(jsonResponse({ error: { message: "bad upstream" } }, 502));
 
-    expect(body.ok).toBe(false);
-    expect(body.status).toBe(502);
-    expect(body.error).toBe("HTTP 502: bad upstream");
+    const result = await testModel("voyage/voyage-3-large", "embedding");
+
+    expect(result).toMatchObject({ ok: false, status: 502, error: "HTTP 502: bad upstream" });
   });
 });

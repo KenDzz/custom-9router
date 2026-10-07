@@ -19,7 +19,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
  *
  * @param {Request} request
  */
-export async function handleEmbeddings(request) {
+export async function handleEmbeddings(request, { trustedDashboardProbe = false } = {}) {
   let body;
   try {
     body = await request.json();
@@ -43,7 +43,7 @@ export async function handleEmbeddings(request) {
 
   // Enforce API key if enabled in settings
   const settings = await getSettings();
-  if (settings.requireApiKey) {
+  if (settings.requireApiKey && !trustedDashboardProbe) {
     if (!apiKey) {
       log.warn("AUTH", "Missing API key (requireApiKey=true)");
       return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
