@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { testSingleConnection } from "./testUtils.js";
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 // POST /api/providers/[id]/test - Test connection
 export async function POST(request, { params }) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePost({ params }));
+}
+
+async function handlePost({ params }) {
   try {
     const { id } = await params;
     const result = await testSingleConnection(id);

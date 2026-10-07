@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const API_ROOT = path.resolve(import.meta.dirname, "../../src/app/api");
-const SCOPED_CALL = /\b(?:get|create|update|delete|clear|validate|set|add|enable|disable)(?:ProviderConnections?|ProviderNodes?|ProxyPools?|ApiKeys?|Combos?|CustomModels?|ModelAliases?|DisabledModels?|MitmAlias(?:All)?|UsageHistory|UsageStats|ChartData|RequestDetails?)\b/;
+const SCOPED_CALL = /\b(?:(?:get|create|update|delete|clear|validate|set|add|enable|disable)(?:ProviderConnections?|ProviderNodes?|ProxyPools?|ApiKeys?|Combos?|CustomModels?|ModelAliases?|DisabledModels?|MitmAlias(?:All)?|UsageHistory|UsageStats|ChartData|RequestDetails?)|testSingleConnection)\b/;
 const WORKSPACE_BOUNDARY = /\b(?:withDashboardWorkspace|withDashboardOrLlmWorkspace|withLlmWorkspace|runWithWorkspace)\b/;
 
 function routeFiles(dir) {
