@@ -2,8 +2,8 @@
 // concurrent requests (including concurrent LLM streams) never cross-read
 // each other's workspaceId. See docs/CUSTOM_HOOKS.md.
 import { AsyncLocalStorage } from "node:async_hooks";
-import { acquireMemberPermit, finishMemberUsage, keepPermitUntilResponseEnds } from "./memberQuota.js";
-import { recordUntrackedMemberUsage } from "./memberUsage.js";
+import { randomUUID } from "node:crypto";
+import { recordUntrackedMemberUsage, waitForMemberUsage, completeMemberResponse } from "./memberUsage.js";
 import { authorizeModelRequest, filterModelCatalog } from "./modelAccess.js";
 
 const als = new AsyncLocalStorage();
@@ -69,38 +69,19 @@ export async function withLlmWorkspace(request, callback) {
 
   const key = extractApiKey(request);
   let context;
-  let releasePermit;
   let trackMemberUsage = false;
   if (key) {
     const resolved = await resolveApiKey(key);
     if (!resolved) return Response.json({ error: "Invalid or inactive API key" }, { status: 401 });
     if (resolved.userId) {
       const { getMemberTokenStatus } = await import("@/lib/db/repos/memberAccessRepo.js");
-      let tokenStatus = await getMemberTokenStatus(resolved.workspaceId, resolved.userId);
+      const tokenStatus = await getMemberTokenStatus(resolved.workspaceId, resolved.userId);
       if (!tokenStatus) {
         return Response.json({ error: "API key owner is no longer a workspace member" }, { status: 403 });
       }
       const billable = request.method === "POST";
       trackMemberUsage = tokenStatus.role !== "owner";
-      if (billable && tokenStatus.dailyTokenLimit > 0) {
-        releasePermit = acquireMemberPermit(resolved.workspaceId, resolved.userId);
-        if (!releasePermit) {
-          return Response.json({ error: "Another request is still using this member's allowance", code: "member_request_in_progress" },
-            { status: 429, headers: { "Retry-After": "1" } });
-        }
-        try {
-          tokenStatus = await getMemberTokenStatus(resolved.workspaceId, resolved.userId);
-        } catch (error) {
-          releasePermit();
-          throw error;
-        }
-        if (!tokenStatus) {
-          releasePermit();
-          return Response.json({ error: "API key owner is no longer a workspace member" }, { status: 403 });
-        }
-      }
       if (billable && tokenStatus.limitReached) {
-        releasePermit?.();
         return Response.json({
           error: "Daily token limit reached",
           code: "daily_token_limit_reached",
@@ -115,7 +96,8 @@ export async function withLlmWorkspace(request, callback) {
       apiKeyId: resolved.apiKeyId,
       userId: resolved.userId || null,
       trackMemberUsage,
-      ...(releasePermit ? { pendingUsageWrites: new Set() } : {}),
+      ...(trackMemberUsage && request.method === "POST"
+        ? { pendingUsageWrites: new Set(), usageRequestId: randomUUID() } : {}),
     };
   } else if (isLocalRequest(request)) {
     const token = request.cookies?.get("auth_token")?.value;
@@ -130,18 +112,15 @@ export async function withLlmWorkspace(request, callback) {
   }
   try {
     const { access, error } = await runWithWorkspace(context, () => authorizeModelRequest(request, context));
-    if (error) {
-      releasePermit?.();
-      return error;
-    }
+    if (error) return error;
     const response = await runWithWorkspace(context, async () => {
       const result = await callback(context);
       await recordUntrackedMemberUsage(request, result, context);
       return filterModelCatalog(request, result, access);
     });
-    return releasePermit ? await keepPermitUntilResponseEnds(response, context, releasePermit) : response;
+    return context.pendingUsageWrites ? await completeMemberResponse(response, context) : response;
   } catch (error) {
-    if (releasePermit) await finishMemberUsage(context, releasePermit);
+    await waitForMemberUsage(context);
     throw error;
   }
 }

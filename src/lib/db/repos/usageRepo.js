@@ -267,7 +267,12 @@ export function saveRequestUsage(entry) {
 
 async function persistRequestUsage(entry) {
   const workspaceId = requireWorkspaceId();
-  const userId = getWorkspaceContext()?.userId || null;
+  const context = getWorkspaceContext();
+  const userId = context?.userId || null;
+  // Distinct concurrent requests may report identical usage in the same millisecond.
+  // Scope deduplication to the request while retaining legacy collector behavior.
+  const usageRequestId = context?.usageRequestId || null;
+  const usageMeta = stringifyJson(usageRequestId ? { usageRequestId } : {});
   try {
     const record = { ...entry, workspaceId, userId };
     const db = await getAdapter();
@@ -281,7 +286,7 @@ async function persistRequestUsage(entry) {
 
     let inserted = false;
 
-    // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
+    // Gift charging, history, daily totals, and lifetime counter share ONE transaction.
     // better-sqlite3 is sync → no JS yield mid-transaction → no race in same process.
     db.transaction(() => {
       const existing = db.get(
@@ -294,11 +299,12 @@ async function persistRequestUsage(entry) {
            AND COALESCE(apiKey, '') = COALESCE(?, '')
            AND promptTokens = ?
            AND completionTokens = ?
+           AND (? IS NULL OR meta = ?)
          ORDER BY id DESC LIMIT 1`,
         [
           workspaceId, record.timestamp, record.provider || null, record.model || null,
           record.connectionId || null, record.apiKey || null,
-          promptTokens, completionTokens,
+          promptTokens, completionTokens, usageRequestId, usageMeta,
         ]
       );
 
@@ -321,7 +327,7 @@ async function persistRequestUsage(entry) {
           workspaceId, record.userId, record.timestamp, record.provider || null, record.model || null,
           record.connectionId || null, record.apiKey || null, record.endpoint || null,
           promptTokens, completionTokens, record.cost || 0, record.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), usageMeta,
         ]
       );
 

@@ -20,7 +20,7 @@ check for collisions on each upgrade rather than assuming zero merge risk:
 - `src/lib/db/migrations/003-member-token-limits.js` — additive quota, key-owner, and usage-owner migration.
 - `src/lib/db/repos/memberAccessRepo.js` — trusted per-member quota and usage aggregation.
 - `src/lib/db/repos/memberManagementRepo.js` — atomic owner profile/password/role/limit changes.
-- `src/lib/workspaces/memberPolicy.js`, `memberQuota.js`, `memberUsage.js` — restricted member surface, streaming permit, and JSON token-usage adapter.
+- `src/lib/workspaces/memberPolicy.js`, `memberUsage.js` — restricted member surface, per-request usage completion, and JSON token-usage adapter. Members can send concurrent requests; recorded usage controls their soft daily limit.
 - `src/app/api/workspaces/**`, `src/app/api/auth/workspace/route.js`, `src/app/api/auth/invite/accept/route.js`, `src/app/api/users/me/route.js` — new route trees.
 - `src/app/api/member/**`, `src/app/(dashboard)/dashboard/member/page.js`, and `src/app/(dashboard)/dashboard/members/page.js` — isolated member/owner surfaces.
 

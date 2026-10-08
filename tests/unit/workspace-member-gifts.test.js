@@ -110,6 +110,23 @@ describe("stackable member gifts", () => {
     });
   });
 
+  it("charges gifts correctly when overlapping requests record usage out of timestamp order", async () => {
+    const member = await limitedMember(100);
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    await gifts.createMemberGift(workspace.id, member.id, {
+      type: "tokens", amount: 100, ...activeWindow(), startsAt: day.toISOString(),
+    }, owner.id);
+    const write = (timestamp, model) => requestContext.runWithWorkspace({ workspaceId: workspace.id, userId: member.id },
+      () => usage.saveRequestUsage({ timestamp, model, tokens: { prompt_tokens: 80, completion_tokens: 0 } }));
+    // The later timestamp is committed first. Both writes must share one base allowance.
+    await write(new Date(day.getTime() + 2_000).toISOString(), "finished-first");
+    await write(new Date(day.getTime() + 1_000).toISOString(), "finished-last");
+    expect(await access.getMemberTokenStatus(workspace.id, member.id)).toMatchObject({
+      usedTokens: 160, tokenGiftRemaining: 40, remainingTokens: 40, requests: 2,
+    });
+  });
+
   it("applies start and expiry boundaries to the second", async () => {
     const member = await limitedMember();
     const startTime = Math.floor((Date.now() + 86_400_000) / 1000) * 1000;

@@ -78,15 +78,21 @@ or perform direct resets; members can redeem only their own reset passes.
    chat responses. Responses without token usage are not estimated; media units
    such as seconds/images are not converted into tokens.
 
-The check uses completed, provider-reported usage. A final request can exceed
-the remaining allowance because its exact output size is unknown before the
-provider finishes; subsequent requests are blocked immediately.
+The check uses completed, provider-reported usage. Members may run multiple
+requests concurrently, including through different keys of the same account.
+Each request checks the remaining allowance when it starts. Requests already
+in flight finish normally and can collectively exceed the remaining allowance;
+new requests are blocked once recorded usage reaches the limit. This is a soft
+daily limit, not a token reservation or a strict cap on in-flight usage.
 
-Capped members have one billable request in flight per workspace in a single
-9Router process. The permit is held until streaming and pending usage writes
-finish; parallel calls return `member_request_in_progress` (429, retry later).
-This is not a distributed quota lock: multiple server replicas require a
-shared reservation/locking implementation before deployment.
+Usage totals and token gift charging are committed in one database transaction.
+Gift charging reads every committed usage row for the day, even when parallel
+requests finish out of timestamp order. Each member POST has a trusted request
+ID stored in usage metadata so distinct requests with identical timestamps and
+token counts remain distinct, while repeated writes from one request are
+deduplicated. A response waits for its own pending usage writes before finishing;
+it never locks other requests for the duration of its stream. Multiple replicas
+must share a database for usage and gifts to remain consistent.
 
 Profiles and passwords belong to the shared user account, whereas roles and
 limits belong to workspace membership. An owner cannot edit identity/password
@@ -106,7 +112,6 @@ or foreign ownership falls back to the importing owner.
 - `src/lib/db/repos/memberAccessRepo.js`
 - `src/lib/db/repos/memberGiftsRepo.js`
 - `src/lib/db/repos/memberManagementRepo.js`
-- `src/lib/workspaces/memberQuota.js`
 - `src/lib/workspaces/memberUsage.js`
 - `src/lib/workspaces/memberPolicy.js`
 - `src/app/api/member/**`

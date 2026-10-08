@@ -125,24 +125,63 @@ describe("workspace member daily token limits", () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("holds a capped member's permit throughout streaming and releases it on completion", async () => {
+  it("allows overlapping streams from multiple keys of the same capped member", async () => {
     await workspaces.updateMemberDailyTokenLimit(workspace.id, member.id, 1000);
     const request = {
       method: "POST", headers: new Headers({ authorization: `Bearer ${memberKey.key}` }),
       nextUrl: new URL("http://localhost/api/v1/chat/completions"),
     };
-    let upstream;
-    const streaming = await requestContext.withLlmWorkspace(request, () => new Response(new ReadableStream({
-      start(controller) { upstream = controller; controller.enqueue(new TextEncoder().encode("first")); },
-    })));
-    const blocked = await requestContext.withLlmWorkspace(request, () => Response.json({ ok: true }));
-    expect(blocked.status).toBe(429);
-    expect((await blocked.json()).code).toBe("member_request_in_progress");
-    upstream.close();
-    expect(await streaming.text()).toBe("first");
+    const secondKey = await requestContext.runWithWorkspace({ workspaceId: workspace.id },
+      () => apiKeys.createApiKey("parallel key", "test-machine", member.id));
+    const upstreams = [];
+    const callback = () => new Response(new ReadableStream({
+      start(controller) { upstreams.push(controller); controller.enqueue(new TextEncoder().encode("first")); },
+    }));
+    const responses = await Promise.all([
+      requestContext.withLlmWorkspace(request, callback),
+      requestContext.withLlmWorkspace({ ...request, headers: new Headers({ authorization: `Bearer ${secondKey.key}` }) }, callback),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    upstreams.forEach((controller) => controller.close());
+    expect(await Promise.all(responses.map((response) => response.text()))).toEqual(["first", "first"]);
     const next = await requestContext.withLlmWorkspace(request, () => Response.json({ ok: true }));
     expect(next.status).toBe(200);
     await next.json();
+  });
+
+  it("counts identical simultaneous requests separately, deduplicates their own writes, and blocks new calls at the limit", async () => {
+    const parallelMember = await users.createUser({ username: "parallel-member" });
+    await workspaces.addMember(workspace.id, parallelMember.id, "member", { dailyTokenLimit: 10 });
+    const key = await requestContext.runWithWorkspace({ workspaceId: workspace.id },
+      () => apiKeys.createApiKey("parallel member key", "test-machine", parallelMember.id));
+    const request = { method: "POST", headers: new Headers({ authorization: `Bearer ${key.key}` }) };
+    const entry = { timestamp: new Date().toISOString(), model: "identical-request", apiKey: key.key, tokens: { prompt_tokens: 5, completion_tokens: 3 } };
+    let proceed;
+    let entered;
+    let count = 0;
+    const gate = new Promise((resolve) => { proceed = resolve; });
+    const bothEntered = new Promise((resolve) => { entered = resolve; });
+    const callback = async () => {
+      if (++count === 2) entered();
+      await gate;
+      await Promise.all([usage.saveRequestUsage(entry), usage.saveRequestUsage(entry)]);
+      return Response.json({ ok: true });
+    };
+    const pending = Promise.all([
+      requestContext.withLlmWorkspace(request, callback),
+      requestContext.withLlmWorkspace(request, callback),
+    ]);
+    await bothEntered;
+    proceed();
+    const responses = await pending;
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    await Promise.all(responses.map((response) => response.json()));
+    expect(await memberAccess.getMemberTokenStatus(workspace.id, parallelMember.id)).toMatchObject({ usedTokens: 16, requests: 2, limitReached: true });
+    const next = vi.fn(() => Response.json({ ok: true }));
+    const blocked = await requestContext.withLlmWorkspace(request, next);
+    expect(blocked.status).toBe(429);
+    expect((await blocked.json()).code).toBe("daily_token_limit_reached");
+    expect(next).not.toHaveBeenCalled();
   });
 
   it("prevents a member from reading or deleting another member's key", async () => {
@@ -234,7 +273,7 @@ describe("workspace member daily token limits", () => {
     expect(response.status).toBe(200);
   });
 
-  it("releases a streaming permit after client cancellation", async () => {
+  it("forwards client cancellation and allows subsequent requests", async () => {
     await workspaces.updateMemberDailyTokenLimit(workspace.id, member.id, 1000);
     const request = { method: "POST", headers: new Headers({ authorization: `Bearer ${memberKey.key}` }) };
     const cancelled = vi.fn();

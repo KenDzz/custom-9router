@@ -150,11 +150,14 @@ export function chargeTokenGiftsForUsage(db, workspaceId, userId, timestamp, tok
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return;
   const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
+  const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).toISOString();
   const quotaStart = member.quotaResetAt && member.quotaResetAt > dayStart ? member.quotaResetAt : dayStart;
+  // Completion order may differ from usage timestamps. Spend the base allowance
+  // against every already-committed row for this day, inside the write transaction.
   const prior = db.get(
     `SELECT COALESCE(SUM(promptTokens + completionTokens), 0) AS used
-     FROM usageHistory WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp <= ? AND id > ?`,
-    [workspaceId, userId, quotaStart, timestamp, Number(member.quotaResetHistoryId || 0)],
+     FROM usageHistory WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp < ? AND id > ?`,
+    [workspaceId, userId, quotaStart, dayEnd, Number(member.quotaResetHistoryId || 0)],
   );
   const baseRemaining = Math.max(0, limit - Number(prior?.used || 0));
   let giftCharge = Math.max(0, Math.floor(tokenCount) - baseRemaining);
