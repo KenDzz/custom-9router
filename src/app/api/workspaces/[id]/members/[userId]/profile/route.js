@@ -49,8 +49,10 @@ export async function PATCH(request, { params }) {
   }
   if (body.username !== undefined) {
     const username = normalizeIdentifier(body.username);
-    if (!/^[a-z0-9._-]{3,64}$/.test(username)) {
-      return NextResponse.json({ error: "Username must be 3-64 characters using letters, numbers, dot, dash or underscore" }, { status: 400 });
+    // Match invitation registration and existing accounts, including email-style
+    // and Unicode usernames. Do not impose an update-only character/length rule.
+    if (!username) {
+      return NextResponse.json({ error: "Username is required" }, { status: 400 });
     }
     const conflict = await getUserByUsername(username);
     if (conflict && conflict.id !== userId) return NextResponse.json({ error: "Username is already in use" }, { status: 409 });

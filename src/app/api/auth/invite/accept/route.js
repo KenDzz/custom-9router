@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getPendingInviteByToken, acceptInvite, getWorkspaceById } from "@/lib/db/repos/workspacesRepo.js";
-import { getUserByIdentifier, createUser, verifyPassword, toPublicUser } from "@/lib/db/repos/usersRepo.js";
+import { getUserByIdentifier, createUser, verifyPassword, toPublicUser, normalizeIdentifier } from "@/lib/db/repos/usersRepo.js";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession.js";
 import { getDashboardAuthSession } from "@/lib/auth/dashboardSession.js";
 import bcrypt from "bcryptjs";
@@ -47,14 +47,15 @@ export async function POST(request) {
 
   let user = await getUserByIdentifier(invite.email);
   if (!user) {
-    if (!username || !password) {
+    const normalizedUsername = normalizeIdentifier(username);
+    if (!normalizedUsername || !password) {
       return NextResponse.json({ error: "username and password required for new account" }, { status: 400 });
     }
-    if (await getUserByIdentifier(username)) {
+    if (await getUserByIdentifier(normalizedUsername)) {
       return NextResponse.json({ error: "username already taken" }, { status: 409 });
     }
     user = await createUser({
-      username,
+      username: normalizedUsername,
       email: invite.email,
       displayName: displayName || username,
       passwordHash: bcrypt.hashSync(password, 10),
