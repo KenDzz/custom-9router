@@ -16,6 +16,7 @@ export default function LoginPage() {
   const [oidcLoginLabel, setOidcLoginLabel] = useState("Sign in with OIDC");
   const [mustChange, setMustChange] = useState(false);
   const [newPassword, setNewPassword] = useState("");
+  const [needsCurrentPassword, setNeedsCurrentPassword] = useState(false);
 
   // Countdown for rate-limit
   useEffect(() => {
@@ -38,7 +39,11 @@ export default function LoginPage() {
 
         if (res.ok) {
           const data = await res.json();
-          if (data.requireLogin === false) {
+          if (data.mustChangePassword) {
+            setMustChange(true);
+            setNeedsCurrentPassword(true);
+          }
+          if (data.requireLogin === false && !data.mustChangePassword) {
             window.location.assign("/dashboard");
             return;
           }
@@ -97,8 +102,8 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ currentPassword: password, newPassword }),
       });
@@ -154,6 +159,16 @@ export default function LoginPage() {
               <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
                 Set a new password before accessing the dashboard remotely.
               </p>
+              {needsCurrentPassword && (
+                <Input
+                  type="password"
+                  label="Current password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                />
+              )}
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">New password</label>
                 <Input
@@ -162,6 +177,8 @@ export default function LoginPage() {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
+                  minLength={8}
+                  autoComplete="new-password"
                   autoFocus
                 />
                 {error && <p className="text-xs text-red-500">{error}</p>}

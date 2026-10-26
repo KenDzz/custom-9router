@@ -3,6 +3,7 @@ import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getDashboardAuthSession, verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { isMemberApiAllowed, isMemberPageAllowed } from "@/lib/workspaces/memberPolicy.js";
+import { usesInitialPassword, isPasswordSession } from "@/lib/auth/passwordPolicy.js";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -27,6 +28,7 @@ const PUBLIC_API_PATHS = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/status",
+  "/api/auth/change-password",
   "/api/auth/oidc",
   "/api/auth/invite/accept",
   "/api/version",
@@ -169,7 +171,9 @@ async function getActiveMembership(request) {
   const user = session.userId ? await getUserById(session.userId) : null;
   if (!user?.isActive) return { role: "inactive" };
   const member = session.activeWorkspaceId ? await getMember(session.activeWorkspaceId, session.userId) : null;
-  return member || { role: "member" };
+  const mustChangePassword = !isLocalRequest(request) && isPasswordSession(session)
+    && await usesInitialPassword(user);
+  return { ...(member || { role: "member" }), mustChangePassword };
 }
 
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
@@ -215,6 +219,11 @@ export async function proxy(request) {
   if (membership?.role === "inactive") {
     return dashboardApi
       ? NextResponse.json({ error: "Account inactive" }, { status: 401 })
+      : NextResponse.redirect(new URL("/login", request.url));
+  }
+  if (membership?.mustChangePassword) {
+    return dashboardApi
+      ? NextResponse.json({ error: "Password change required", mustChangePassword: true }, { status: 403 })
       : NextResponse.redirect(new URL("/login", request.url));
   }
   if (dashboardApi && membership && membership.role !== "owner"

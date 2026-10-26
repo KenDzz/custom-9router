@@ -5,8 +5,10 @@ import { isOidcConfigured } from "@/lib/auth/oidc";
 import { getDashboardAuthSession } from "@/lib/auth/dashboardSession";
 import { getUserById } from "@/lib/db/repos/usersRepo.js";
 import { MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
+import { usesInitialPassword, isPasswordSession } from "@/lib/auth/passwordPolicy.js";
+import { isLocalRequest } from "@/dashboardGuard";
 
-export async function GET() {
+export async function GET(request) {
   try {
     const settings = await getSettings();
     const cookieStore = await cookies();
@@ -20,6 +22,8 @@ export async function GET() {
     const loginMethod = session?.loginMethod === "oidc" || session?.oidc ? "OIDC" : "Password";
 
     return NextResponse.json({
+      mustChangePassword: !!user?.isActive && isPasswordSession(session)
+        && !isLocalRequest(request) && await usesInitialPassword(user),
       requireLogin,
       authMode,
       oidcConfigured: isOidcConfigured(settings),
@@ -30,7 +34,7 @@ export async function GET() {
       oidcName: oidcName || null,
       oidcEmail: oidcEmail || null,
       oidcLogin: !!session?.oidc,
-    });
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({
       requireLogin: true,

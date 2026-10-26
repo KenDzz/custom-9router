@@ -5,13 +5,14 @@ const mocks = vi.hoisted(() => ({
   getMember: vi.fn(),
   getUserById: vi.fn(),
   getSettings: vi.fn(),
+  verifyPassword: vi.fn(),
 }));
 vi.mock("@/lib/auth/dashboardSession", () => ({
   getDashboardAuthSession: mocks.getDashboardAuthSession,
   verifyDashboardAuthToken: vi.fn(async () => true),
 }));
 vi.mock("@/lib/db/repos/workspacesRepo.js", () => ({ getMember: mocks.getMember }));
-vi.mock("@/lib/db/repos/usersRepo.js", () => ({ getUserById: mocks.getUserById }));
+vi.mock("@/lib/db/repos/usersRepo.js", () => ({ getUserById: mocks.getUserById, verifyPassword: mocks.verifyPassword }));
 vi.mock("@/lib/localDb", () => ({ getSettings: mocks.getSettings, validateApiKey: vi.fn() }));
 vi.mock("@/shared/utils/machineId", () => ({ getConsistentMachineId: vi.fn(async () => "cli-test") }));
 
@@ -29,6 +30,46 @@ beforeEach(() => {
   mocks.getMember.mockResolvedValue({ role: "member" });
   mocks.getUserById.mockResolvedValue({ id: "user", isActive: true });
   mocks.getSettings.mockResolvedValue({ requireLogin: false });
+  mocks.verifyPassword.mockResolvedValue(false);
+});
+
+describe("remote initial password enforcement", () => {
+  function remoteRequest(pathname, method = "GET") {
+    return new NextRequest(`https://router.example.com${pathname}`, {
+      method, headers: { cookie: "auth_token=test", host: "router.example.com" },
+    });
+  }
+
+  beforeEach(() => {
+    mocks.getUserById.mockResolvedValue({ id: "user", isActive: true, passwordHash: "seed-hash" });
+    mocks.verifyPassword.mockResolvedValue(true);
+  });
+
+  it.each(["member", "owner"])("redirects a %s opening another tab before changing password", async (role) => {
+    mocks.getMember.mockResolvedValue({ role });
+    const response = await proxy(remoteRequest("/dashboard"));
+    expect(response.headers.get("location")).toBe("https://router.example.com/login");
+  });
+
+  it("blocks dashboard APIs even when requireLogin is false", async () => {
+    const response = await proxy(remoteRequest("/api/member/keys", "POST"));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ mustChangePassword: true });
+  });
+
+  it("allows password change and status without granting settings access", async () => {
+    expect((await proxy(remoteRequest("/api/auth/change-password", "POST"))).status).toBe(200);
+    expect((await proxy(remoteRequest("/api/auth/status"))).status).toBe(200);
+    mocks.verifyPassword.mockResolvedValue(false);
+    expect((await proxy(remoteRequest("/api/settings", "PATCH"))).status).toBe(403);
+    expect((await proxy(remoteRequest("/dashboard/member"))).status).toBe(200);
+  });
+
+  it("preserves local and OIDC sessions", async () => {
+    expect((await proxy(request("/dashboard/member"))).status).toBe(200);
+    mocks.getDashboardAuthSession.mockResolvedValue({ userId: "user", loginMethod: "oidc" });
+    expect((await proxy(remoteRequest("/dashboard/member"))).status).toBe(200);
+  });
 });
 
 describe("member access enforced before legacy bypasses", () => {

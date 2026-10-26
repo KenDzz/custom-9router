@@ -8,10 +8,10 @@ import { isLocalRequest } from "@/dashboardGuard";
 import { getUserByIdentifier, verifyPassword } from "@/lib/db/repos/usersRepo.js";
 import { getWorkspacesForUser } from "@/lib/db/repos/workspacesRepo.js";
 import { DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants.js";
+import { usesInitialPassword } from "@/lib/auth/passwordPolicy.js";
 
 const RESET_HINT = "Forgot password? Reset to default via 9Router CLI → Settings → Reset Password to Default.";
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
-const DEFAULT_PASSWORD = "123456";
 // Migrated single-tenant installs only ever have one user, "admin" — accepting
 // no identifier keeps old dashboard clients (pre-workspace UI) working as-is.
 const DEFAULT_IDENTIFIER = "admin";
@@ -64,7 +64,7 @@ export async function POST(request) {
       // Still on the seed default password on a remote client → force a
       // password change before the dashboard is exposed remotely (local UX unchanged).
       const mustChangePassword =
-        !isLocalRequest(request) && await verifyPassword(user, process.env.INITIAL_PASSWORD || DEFAULT_PASSWORD);
+        !isLocalRequest(request) && await usesInitialPassword(user);
 
       return NextResponse.json({ success: true, mustChangePassword }, { headers: NO_STORE_HEADERS });
     }
