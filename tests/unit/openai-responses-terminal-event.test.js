@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { workspaceTest as it } from "../helpers/workspaceTest.js";
+import { describe, expect} from "vitest";
 
 import { FORMATS } from "../../open-sse/translator/formats.js";
 import { createSSETransformStreamWithLogger } from "../../open-sse/utils/stream.js";

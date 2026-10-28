@@ -30,11 +30,17 @@ beforeAll(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-details-tab-"));
   process.env.DATA_DIR = tempDir;
   vi.resetModules();
-  db = await import("@/lib/db/index.js");
+  const rawDb = await import("@/lib/db/index.js");
+  const { runWithWorkspace } = await import("@/lib/workspaces/requestContext.js");
+  const { DEFAULT_WORKSPACE_ID: testWorkspaceId } = await import("@/lib/workspaces/constants.js");
+  db = Object.fromEntries(Object.entries(rawDb).map(([key, value]) => [key, typeof value === "function"
+    ? (...args) => runWithWorkspace({ workspaceId: testWorkspaceId }, () => value(...args)) : value]));
   await db.initDb();
   const { enterWorkspaceForTest } = await import("@/lib/workspaces/requestContext.js");
   const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");
   enterWorkspaceForTest({ workspaceId: DEFAULT_WORKSPACE_ID });
+  // 3fab15ae moved the switch back to enableObservability (default false); the old
+  // enableObservability2 key is ignored, which left request details disabled here.
   await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
@@ -151,7 +157,9 @@ describe("backupDbLite — excludes requestDetails, keeps critical data", () => 
     expect(fs.existsSync(dest)).toBe(true);
 
     // Open backup and assert requestDetails is empty, settings present
-    const Database = (await import("better-sqlite3")).default;
+    const Database = Number(process.versions.node.split(".")[0]) >= 22
+      ? (await import("node:sqlite")).DatabaseSync
+      : (await import("better-sqlite3")).default;
     const bak = new Database(dest);
     try {
       // requestDetails is fully excluded — table must not exist in the backup

@@ -47,7 +47,14 @@ export async function GET(request) {
       if (endDate) filter.endDate = endDate;
 
       const result = await getRequestDetails(filter);
-      return NextResponse.json(result);
+      const details = (result.details || []).map((detail) => {
+        const redacted = { ...detail };
+        for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
+          if (redacted[key] !== undefined) redacted[key] = { redacted: true };
+        }
+        return redacted;
+      });
+      return NextResponse.json({ ...result, details });
     } catch (error) {
       console.error("[API] Failed to get request details:", error);
       return NextResponse.json(

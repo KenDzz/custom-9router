@@ -1,5 +1,5 @@
 import { getAdapter } from "../driver.js";
-import { stringifyJson } from "../helpers/jsonCol.js";
+import { stringifyJson, parseJson } from "../helpers/jsonCol.js";
 import { makeWorkspaceKv } from "../helpers/workspaceKvStore.js";
 import { requireWorkspaceId } from "@/lib/workspaces/requestContext.js";
 
@@ -30,23 +30,23 @@ export async function getCustomModels() {
   return Object.values(all);
 }
 
-// Atomic check-then-insert inside transaction to prevent duplicate races
-export async function addCustomModel({ providerAlias, id, type = "llm", name }) {
+// Atomic upsert inside transaction to prevent duplicate races.
+// Re-adding an existing model updates caps/name/transport without resetting omitted fields.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, transport }) {
   const workspaceId = requireWorkspaceId();
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
   db.transaction(() => {
-    const row = db.get(
-      `SELECT 1 FROM workspaceKv WHERE workspaceId = ? AND scope = 'customModels' AND key = ?`,
-      [workspaceId, k],
-    );
-    if (row) return;
-    const value = stringifyJson({ providerAlias, id, type, name: name || id });
-    db.run(
-      `INSERT INTO workspaceKv(workspaceId, scope, key, value) VALUES(?, 'customModels', ?, ?)`,
-      [workspaceId, k, value],
-    );
+    const row = db.get(`SELECT value FROM workspaceKv WHERE workspaceId = ? AND scope = 'customModels' AND key = ?`, [workspaceId, k]);
+    if (row) {
+      const prev = parseJson(row.value) || {};
+      const next = { ...prev, ...(name ? { name } : {}), ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) };
+      db.run(`UPDATE workspaceKv SET value = ? WHERE workspaceId = ? AND scope = 'customModels' AND key = ?`, [stringifyJson(next), workspaceId, k]);
+      return;
+    }
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) });
+    db.run(`INSERT INTO workspaceKv(workspaceId, scope, key, value) VALUES(?, 'customModels', ?, ?)`, [workspaceId, k, value]);
     added = true;
   });
   return added;

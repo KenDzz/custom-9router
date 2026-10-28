@@ -2,8 +2,29 @@ import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
 import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
 import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+import { CAPACITY_META, isSttTransport } from "@/shared/constants/models";
 
 export const dynamic = "force-dynamic";
+
+// Whitelist capability keys to boolean values — ignore anything else
+function sanitizeCaps(caps) {
+  if (!caps || typeof caps !== "object") return null;
+  const clean = {};
+  for (const key of Object.keys(CAPACITY_META)) {
+    if (typeof caps[key] === "boolean") clean[key] = caps[key];
+  }
+  return Object.keys(clean).length ? clean : null;
+}
+
+// Accepted STT transport markers live in the shared whitelist
+// (src/shared/constants/models STT_TRANSPORT_META) — the dashboard transport
+// select and this validator must agree on one set, so neither owns a copy.
+// Unknown or mistyped values are silently dropped, the same policy
+// sanitizeCaps applies to capability keys.
+function sanitizeTransport(transport, type) {
+  if (type !== "stt" || !isSttTransport(transport)) return null;
+  return transport.trim();
+}
 
 // GET /api/models/custom - List all custom models
 export async function GET(request) {
@@ -27,11 +48,13 @@ export async function POST(request) {
 
 async function handlePost(request) {
   try {
-    const { providerAlias, id, type, name } = await request.json();
+    const { providerAlias, id, type, name, caps, transport } = await request.json();
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
-    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name });
+    const cleanCaps = sanitizeCaps(caps);
+    const cleanTransport = sanitizeTransport(transport, type || "llm");
+    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name, ...(cleanCaps ? { caps: cleanCaps } : {}), ...(cleanTransport ? { transport: cleanTransport } : {}) });
     return NextResponse.json({ success: true, added });
   } catch (error) {
     console.log("Error adding custom model:", error);

@@ -16,12 +16,14 @@ vi.mock("@/lib/db/repos/usersRepo.js", () => ({ getUserById: mocks.getUserById, 
 vi.mock("@/lib/localDb", () => ({ getSettings: mocks.getSettings, validateApiKey: vi.fn() }));
 vi.mock("@/shared/utils/machineId", () => ({ getConsistentMachineId: vi.fn(async () => "cli-test") }));
 
+vi.mock("@/lib/auth/trustedPeer", () => ({ hasTrustedPeerHeaders: () => true }));
+
 const { proxy } = await import("@/dashboardGuard.js");
 const { NextRequest } = await import("next/server");
 
 function request(pathname, method = "GET") {
   return new NextRequest(`http://localhost:20127${pathname}`, {
-    method, headers: { cookie: "auth_token=test", host: "localhost:20127", "x-9r-cli-token": "cli-test" },
+    method, headers: { cookie: "auth_token=test", host: "localhost:20127", "x-9r-real-ip": "127.0.0.1", "x-9r-cli-token": "cli-test" },
   });
 }
 

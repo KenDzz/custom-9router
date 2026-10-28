@@ -28,6 +28,10 @@ async function executeDashboardProbe(url, init) {
     const { handleStt } = await import("@/sse/handlers/stt.js");
     return handleStt(probeRequest, { trustedDashboardProbe: true });
   }
+  if (path.endsWith("/systemone")) {
+    const { handleSystemone } = await import("@/sse/handlers/systemone.js");
+    return handleSystemone(probeRequest, { trustedDashboardProbe: true });
+  }
   throw new Error("Unsupported model probe endpoint");
 }
 

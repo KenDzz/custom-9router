@@ -121,7 +121,9 @@ describe("Schema migrations", () => {
   it("existing v1 DB with data → migration 002 rebuilds routing tables into Default workspace", async () => {
     // Build a real v1-shaped DB by hand (no workspaceId columns), independent
     // of current schema.js, to exercise the shadow-table rebuild path.
-    const Database = (await import("better-sqlite3")).default;
+    const Database = Number(process.versions.node.split(".")[0]) >= 22
+      ? (await import("node:sqlite")).DatabaseSync
+      : (await import("better-sqlite3")).default;
     const dbFile = path.join(tempDir, "db", "data.sqlite");
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
     const raw = new Database(dbFile);

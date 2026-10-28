@@ -15,7 +15,11 @@ beforeAll(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-cached-e2e-"));
   process.env.DATA_DIR = tempDir;
   vi.resetModules();
-  db = await import("@/lib/db/index.js");
+  const rawDb = await import("@/lib/db/index.js");
+  const { runWithWorkspace } = await import("@/lib/workspaces/requestContext.js");
+  const { DEFAULT_WORKSPACE_ID: testWorkspaceId } = await import("@/lib/workspaces/constants.js");
+  db = Object.fromEntries(Object.entries(rawDb).map(([key, value]) => [key, typeof value === "function"
+    ? (...args) => runWithWorkspace({ workspaceId: testWorkspaceId }, () => value(...args)) : value]));
   await db.initDb();
   const { enterWorkspaceForTest } = await import("@/lib/workspaces/requestContext.js");
   const { DEFAULT_WORKSPACE_ID } = await import("@/lib/workspaces/constants.js");

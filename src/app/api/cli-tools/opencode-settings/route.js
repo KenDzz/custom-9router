@@ -1,6 +1,11 @@
 "use server";
 
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+
+
 import { NextResponse } from "next/server";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -54,7 +59,7 @@ const has9RouterConfig = (config) => {
 };
 
 // GET - Check opencode CLI and read current settings
-export async function GET() {
+async function handleGET() {
   try {
     const isInstalled = await checkOpenCodeInstalled();
 
@@ -88,7 +93,7 @@ export async function GET() {
 }
 
 // POST - Apply 9Router as openai-compatible provider (multi-model support)
-export async function POST(request) {
+async function handlePOST(request) {
   try {
     const { baseUrl, apiKey, model, models, activeModel, subagentModel } = await request.json();
 
@@ -112,7 +117,7 @@ export async function POST(request) {
     } catch { /* No existing config */ }
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
-    const keyToUse = apiKey || "sk_9router";
+    const keyToUse = await resolveCliApiKey(apiKey);
     const effectiveSubagentModel = subagentModel || modelsArray[0];
 
     // Ensure provider object
@@ -209,7 +214,7 @@ export async function PATCH(request) {
 }
 
 // DELETE - Remove 9Router provider or specific models from config
-export async function DELETE(request) {
+async function handleDELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const modelToRemove = searchParams.get("model");
@@ -262,4 +267,16 @@ export async function DELETE(request) {
     console.log("Error resetting opencode settings:", error);
     return NextResponse.json({ error: "Failed to reset opencode settings" }, { status: 500 });
   }
+}
+
+export async function GET(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleGET(request, context));
+}
+
+export async function POST(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePOST(request, context));
+}
+
+export async function DELETE(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDELETE(request, context));
 }

@@ -7,5 +7,5 @@ export async function usesInitialPassword(user) {
 }
 
 export function isPasswordSession(session) {
-  return !!session && session.loginMethod !== "oidc" && !session.oidc;
+  return !!session && session.loginMethod !== "oidc" && session.loginMethod !== "saml" && !session.oidc && !session.saml;
 }

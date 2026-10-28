@@ -272,3 +272,15 @@ model-access endpoints and the Members page; Member overview is read-only.
 Keep the target extractor aligned with upstream aliases, Gemini URL handling,
 provider-as-model search/fetch, and video default-provider behavior on upgrade.
 Run `tests/unit/workspace-model-access.test.js` alongside route coverage.
+
+### Upstream v0.5.111 integration (2026-10-28)
+
+- Base: custom 0fa6e839 (upstream v0.5.35); merged upstream tag v0.5.111 / 3a978a63.
+- Preserve all custom migrations 001–005. The additive schema now has backup schema version 6, including upstream API-key access columns; do not confuse that counter with the migration registry version.
+- API-key export/import carries both member ownership and upstream access restrictions. Custom-model upserts preserve caps/transport in workspaceKv. Provider bulk-import deduplication and priority queries remain workspace-scoped.
+- New presets, OAuth imports, web-login, Claude reset, CLI key resolution and model lookup/System One routes enter the existing workspace boundary. Global provider overrides/catalog sync/SAML configuration testing require the Default-workspace owner.
+- SAML ACS creates a persistent, protocol-scoped external user and issues userId/activeWorkspaceId claims. SAML sessions are excluded from password-rotation enforcement. External email alone cannot claim a local account.
+- New OAuth callback providers carry the initiating workspace/user and recheck membership before persistence. Background token refresh enumerates connections globally only at its maintenance boundary, then refreshes inside each connection's workspace. Web-login sessions and browser profiles accept an optional workspace scope.
+- Upstream catch-all model lookup replaces the old [kind] route while retaining kind URLs. Apply custom member model policies to single-model responses as well as lists.
+- Test setup uses disposable DATA_DIR values. Stream unit tests explicitly enter ALS at test-body execution; beforeAll enterWith alone is insufficient with the current Vitest runner. API handler unit mocks isolate authorization; workspace suites cover the real boundary.
+- Run workspace-upstream-upgrade.test.js in addition to existing workspace, auth, migration and usage suites on future upgrades.

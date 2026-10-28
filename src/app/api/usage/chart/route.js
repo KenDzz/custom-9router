@@ -3,7 +3,7 @@ import { getChartData } from "@/lib/usageDb";
 import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
 
-const VALID_PERIODS = new Set(["today", "24h", "7d", "30d", "60d"]);
+const VALID_PERIODS = new Set(["today", "24h", "7d", "30d", "60d", "all"]);
 
 export async function GET(request) {
   return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, async () => {

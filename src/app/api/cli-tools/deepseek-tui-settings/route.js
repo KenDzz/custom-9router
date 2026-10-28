@@ -1,6 +1,11 @@
 "use server";
 
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+
+
 import { NextResponse } from "next/server";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
@@ -102,7 +107,7 @@ const has9RouterConfig = (config) => {
     return /localhost|127\.0\.0\.1|0\.0\.0\.0/.test(openaiSection.base_url);
 };
 
-export async function GET() {
+async function handleGET() {
     try {
         const installed = await checkDeepSeekInstalled();
         if (!installed) {
@@ -122,7 +127,7 @@ export async function GET() {
     }
 }
 
-export async function POST(request) {
+async function handlePOST(request) {
     try {
         const { baseUrl, apiKey, model } = await request.json();
         if (!baseUrl || !model) {
@@ -132,7 +137,7 @@ export async function POST(request) {
         const dir = getDeepSeekDir();
         await fs.mkdir(dir, { recursive: true });
 
-        const newConfig = build9RouterConfig(baseUrl, apiKey || "sk_9router", model);
+        const newConfig = build9RouterConfig(baseUrl, await resolveCliApiKey(apiKey), model);
         await fs.writeFile(getDeepSeekConfigPath(), newConfig);
 
         return NextResponse.json({
@@ -146,7 +151,7 @@ export async function POST(request) {
     }
 }
 
-export async function DELETE() {
+async function handleDELETE() {
     try {
         const configPath = getDeepSeekConfigPath();
         try {
@@ -161,4 +166,15 @@ export async function DELETE() {
         console.log("Error resetting deepseek-tui settings:", error);
         return NextResponse.json({ error: "Failed to reset deepseek-tui settings" }, { status: 500 });
     }
+}
+export async function GET(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleGET(request, context));
+}
+
+export async function POST(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePOST(request, context));
+}
+
+export async function DELETE(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDELETE(request, context));
 }

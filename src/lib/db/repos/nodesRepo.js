@@ -94,6 +94,7 @@ export async function deleteProviderNode(id) {
     if (!row) return;
     removed = rowToNode(row);
     db.run(`DELETE FROM providerNodes WHERE id = ? AND workspaceId = ?`, [id, workspaceId]);
+    db.run(`DELETE FROM workspaceKv WHERE workspaceId = ? AND scope = 'customModels' AND key LIKE ?`, [workspaceId, `${id}|%`]);
   });
   return removed;
 }

@@ -1,6 +1,11 @@
 "use server";
 
+import { withDashboardWorkspace } from "@/lib/workspaces/requestContext.js";
+import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+
+
 import { NextResponse } from "next/server";
+import { resolveCliApiKey } from "../resolveApiKey.js";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -41,7 +46,7 @@ const get9RouterEntry = (config) => {
 };
 
 // GET - Read current copilot config
-export async function GET() {
+async function handleGET() {
   try {
     const config = await readConfig();
     const entry = get9RouterEntry(config);
@@ -61,7 +66,7 @@ export async function GET() {
 }
 
 // POST - Apply 9Router config to chatLanguageModels.json
-export async function POST(request) {
+async function handlePOST(request) {
   try {
     const { baseUrl, apiKey, models } = await request.json();
 
@@ -81,7 +86,7 @@ export async function POST(request) {
     } catch { /* No existing config */ }
 
     const endpointUrl = `${baseUrl}/chat/completions#models.ai.azure.com`;
-    const keyToUse = apiKey || "sk_9router";
+    const keyToUse = await resolveCliApiKey(apiKey);
 
     const newEntry = {
       name: "9Router",
@@ -120,7 +125,7 @@ export async function POST(request) {
 }
 
 // DELETE - Remove 9Router entry from chatLanguageModels.json
-export async function DELETE() {
+async function handleDELETE() {
   try {
     const configPath = getConfigPath();
 
@@ -147,4 +152,16 @@ export async function DELETE() {
     console.log("Error resetting copilot settings:", error);
     return NextResponse.json({ error: "Failed to reset copilot settings" }, { status: 500 });
   }
+}
+
+export async function GET(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleGET(request, context));
+}
+
+export async function POST(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handlePOST(request, context));
+}
+
+export async function DELETE(request, context) {
+  return withDashboardWorkspace(request, WORKSPACE_ROLES.ADMIN, () => handleDELETE(request, context));
 }

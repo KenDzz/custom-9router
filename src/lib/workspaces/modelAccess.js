@@ -49,9 +49,15 @@ export async function authorizeModelRequest(request, context) {
 export async function filterModelCatalog(request, response, access) {
   if (!access.restricted || request.method !== "GET" || !response?.ok) return response;
   const path = requestPath(request);
-  if (!/\/(?:api\/)?v1\/models(?:\/[^/]+)?\/?$/.test(path)) return response;
+  if (!/\/(?:api\/)?v1\/models(?:\/.*)?\/?$/.test(path)) return response;
   const payload = await response.clone().json();
-  if (!Array.isArray(payload.data)) return response;
+  if (!Array.isArray(payload.data)) {
+    if (typeof payload.id === "string" && !await access.allows(payload.id)) {
+      return Response.json({ error: { message: "Model not found", type: "invalid_request_error", code: "model_not_found" } },
+        { status: 404, headers: { "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" } });
+    }
+    return response;
+  }
   const allowed = await Promise.all(payload.data.map((model) => access.allows(model.id)));
   const headers = new Headers(response.headers);
   headers.delete("content-length");
