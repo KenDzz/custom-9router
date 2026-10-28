@@ -462,6 +462,15 @@ Set `X-9Router-Token-Saver: off` to bypass all token savers for one chat request
 
 ### 🚀 RTK Token Saver
 
+Token Saver switches support workspace and member overrides in **Dashboard → Members**.
+Each of RTK, Headroom, Caveman, Ponytail and PXPIPE can inherit, turn on, or turn off.
+Priority is **Member in this workspace → Workspace → system defaults** from the Token Saver page.
+Workspace Owners manage these overrides; changes apply to new requests for existing API keys.
+Service URLs, compression levels and installation remain system settings.
+The request header `x-9router-token-saver: off` bypasses all five features, including explicit overrides.
+Enabling a feature still requires its service to be available and its request format to be supported.
+
+
 Tool outputs (`git diff`, `grep`, `find`, `ls`, `tree`, log dumps...) often eat 30-50% of your prompt budget. RTK detects them and applies smart, lossless compression **before** the request hits the LLM:
 
 - **Filters:** `git-diff`, `git-status`, `grep`, `find`, `ls`, `tree`, `dedup-log`, `smart-truncate`, `read-numbered`, `search-list`

@@ -466,6 +466,11 @@ export default function TokenSaverClient() {
 
   return (
     <div className="space-y-6 p-6">
+      <p className="text-sm text-text-muted">
+        These are system defaults. Configure workspace and member overrides in{" "}
+        <a href="/dashboard/members" className="text-primary underline">Member management</a>.
+        {" "}Priority: Member → Workspace → System.
+      </p>
       <Card id="rtk">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold flex items-center gap-2">

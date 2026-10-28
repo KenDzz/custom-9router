@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Avatar, Badge, Button, Card, ConfirmModal, Input, Modal, Select } from "@/shared/components";
 import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
+import TokenSaverPanel from "@/shared/components/workspaces/TokenSaverPanel";
 import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
 import { formatDailyTokenLimitInput, normalizeDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 
@@ -238,6 +239,7 @@ export default function MembersPage() {
       )}
 
       {workspace && <ModelAccessPanel key={workspace.id} workspaceId={workspace.id} />}
+      {workspace && <TokenSaverPanel key={`token-saver:${workspace.id}`} workspaceId={workspace.id} />}
 
       <Card padding="none">
         <div className="flex flex-col gap-3 border-b border-border-subtle p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -422,6 +424,7 @@ export default function MembersPage() {
               )}
 
               {profile && <ModelAccessPanel key={selected.userId} workspaceId={workspace.id} userId={selected.userId} />}
+              {profile && <TokenSaverPanel key={`token-saver:${selected.userId}`} workspaceId={workspace.id} userId={selected.userId} />}
 
               <div className="rounded-[14px] border border-border-subtle p-4">
                 <h4 className="font-semibold text-text-main">Reset password</h4>
