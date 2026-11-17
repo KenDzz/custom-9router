@@ -33,6 +33,7 @@ const navItems = [
 
 const memberNavItems = [
   { href: "/dashboard/member", label: "My Dashboard", icon: "space_dashboard" },
+  { href: "/dashboard/member/quota", label: "Quota Status", icon: "data_usage" },
 ];
 
 const debugItems = [
@@ -100,6 +101,7 @@ export default function Sidebar({ onClose }) {
   }, [showFullDashboard]);
 
   const isActive = (href) => {
+    if (href === "/dashboard/member") return pathname === href;
     if (href === "/dashboard/endpoint") {
       return pathname === "/dashboard" || pathname.startsWith("/dashboard/endpoint");
     }

@@ -7,6 +7,7 @@ const MEMBER_API_METHODS = {
 };
 
 export function isMemberApiAllowed(pathname, method = "GET") {
+  if (pathname === "/api/member/quota") return method.toUpperCase() === "GET";
   if (pathname === "/api/member" || pathname.startsWith("/api/member/")) return true;
   return MEMBER_API_METHODS[pathname]?.includes(method.toUpperCase()) || false;
 }

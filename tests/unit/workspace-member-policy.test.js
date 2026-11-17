@@ -85,6 +85,12 @@ describe("member access enforced before legacy bypasses", () => {
     expect((await proxy(request("/api/member/keys", "POST"))).status).toBe(200);
     expect((await proxy(request("/api/auth/workspace", "POST"))).status).toBe(200);
   });
+  it("allows the read-only quota page without granting provider account access", async () => {
+    expect((await proxy(request("/dashboard/member/quota"))).status).toBe(200);
+    expect((await proxy(request("/api/member/quota"))).status).toBe(200);
+    expect((await proxy(request("/api/member/quota", "POST"))).status).toBe(403);
+    expect((await proxy(request("/api/usage/provider-account"))).status).toBe(403);
+  });
   it("does not allow a member to create an unrestricted owner workspace", async () => {
     expect((await proxy(request("/api/workspaces", "POST"))).status).toBe(403);
   });

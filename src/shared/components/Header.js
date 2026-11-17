@@ -22,6 +22,9 @@ const getPageInfo = (pathname) => {
   if (pathname === "/dashboard/members") return {
     title: "Members", description: "Manage workspace member access and daily limits", icon: "group", breadcrumbs: [],
   };
+  if (pathname === "/dashboard/member/quota") return {
+    title: "Quota Status", description: "Check remaining provider quota and reset times", icon: "data_usage", breadcrumbs: [],
+  };
   if (pathname === "/dashboard/member" || pathname.startsWith("/dashboard/member/")) return {
     title: "My Dashboard", description: "Your token allowance, API keys and usage", icon: "space_dashboard", breadcrumbs: [],
   };
