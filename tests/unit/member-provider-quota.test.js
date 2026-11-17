@@ -34,6 +34,7 @@ describe("read-only member provider quota", () => {
       } });
     const [first, second] = await Promise.all([GET({}), GET({})]);
     expect(first.headers.get("Cache-Control")).toBe("no-store");
+    expect(first.headers.get("X-Quota-Workspace")).toBe("member-quota-test");
     const expected = { providers: [
       { provider: "claude", remainingPercent: null, resetAt: null, unlimited: false },
       { provider: "codex", remainingPercent: 75, resetAt, unlimited: false },

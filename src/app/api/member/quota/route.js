@@ -8,7 +8,9 @@ export async function GET(request) {
   return withDashboardWorkspace(request, WORKSPACE_ROLES.MEMBER, async ({ session }) => {
     try {
       const providers = await getMemberProviderQuota(session.activeWorkspaceId);
-      return Response.json({ providers }, { headers: { "Cache-Control": "no-store" } });
+      return Response.json({ providers }, {
+        headers: { "Cache-Control": "no-store", "X-Quota-Workspace": session.activeWorkspaceId },
+      });
     } catch {
       return Response.json({ error: "Provider quota is unavailable" }, { status: 503 });
     }
