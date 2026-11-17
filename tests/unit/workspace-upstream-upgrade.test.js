@@ -71,7 +71,8 @@ describe("v0.5.111 and custom workspace integration", () => {
     await db.closeDb();
     adapter = await (await import("@/lib/db/driver.js")).getAdapter();
     expect(adapter.all("SELECT id, workspaceId, userId, key FROM apiKeys")).toEqual(before);
-    expect(fs.readdirSync(path.join(dir, "db", "backups")).some((name) => name.startsWith("schema-5-to-6"))).toBe(true);
+    const { SCHEMA_VERSION } = await import("@/lib/db/schema.js");
+    expect(fs.readdirSync(path.join(dir, "db", "backups")).some((name) => name.startsWith(`schema-5-to-${SCHEMA_VERSION}`))).toBe(true);
     expect(adapter.get("SELECT dailyTokenLimit FROM workspaceMembers WHERE workspaceId = ? AND userId = ?", [first.id, member.id]).dailyTokenLimit).toBe(12345);
     expect((await scope(first, () => db.getApiKeys()))[0].access).toEqual({ restricted: false, allow: [] });
   });

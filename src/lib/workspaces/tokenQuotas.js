@@ -1,5 +1,11 @@
 import { WORKSPACE_ROLES } from "./constants.js";
 
+// usageHistory columns holding the quota a row was charged, in standard tokens
+// (see standardTokens.js). Rows written before migration 007 have NULL and
+// count their raw tokens.
+export const QUOTA_INPUT_SQL = "COALESCE(quotaInputTokens, promptTokens)";
+export const QUOTA_OUTPUT_SQL = "COALESCE(quotaOutputTokens, completionTokens)";
+
 export function readSplitTokenLimits(body) {
   const { dailyInputTokenLimit, dailyOutputTokenLimit } = body;
   if (dailyInputTokenLimit === undefined && dailyOutputTokenLimit === undefined) return {};

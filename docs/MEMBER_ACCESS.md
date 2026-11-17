@@ -19,9 +19,36 @@ merged without reapplying business rules throughout the request pipeline.
 | LLM API after daily limit is reached | Unlimited | HTTP 429 until next local midnight |
 
 `0` means unlimited. Owners are always unlimited even if a stale non-zero
-value exists in the database. Daily usage counts input plus output tokens;
-cached-token metadata remains visible in the normal owner usage dashboard but
-is not charged a second time.
+value exists in the database. Limits, usage, and token gifts are counted in
+**standard tokens** (see below), not raw tokens. Raw input/output counts stay
+visible in the owner usage dashboard and as "Total recorded today".
+
+## Standard tokens
+
+One million standard tokens equal $2 of model cost, the input price of a
+mid-tier Sonnet model. Each usage row is priced with the same table as the
+owner cost dashboard (`pricingRepo.getPricingForModel`: owner overrides first,
+then the built-in table) and converted with
+`ceil(costUsd * 1,000,000 / 2)`. The input side (non-cached input, cache reads,
+cache writes) and the output side (output, reasoning) are priced separately by
+calling the unchanged `calculateCostFromTokens()` with the other side zeroed, so
+split input/output limits keep working and the quota always mirrors the cost
+column. Consequences:
+
+- Cache reads cost about a tenth of fresh input, so cache-heavy agent traffic
+  (Claude Code, Codex) uses far less allowance than its raw token count.
+- An expensive model uses more allowance per token than a cheap one (Opus
+  output costs more than Sonnet output, which costs more than Haiku output).
+- A model priced at zero costs 0 standard tokens.
+- A model with no price falls back to raw tokens at 1x, so an unknown model is
+  never free.
+
+The charged values are stored per row in `usageHistory.quotaInputTokens` and
+`quotaOutputTokens`, so later price edits do not rewrite past usage. Rows
+without them (older than the migration window) count raw tokens. Migration 007
+adds the columns and backfills member rows from the last 8 days. Editing or
+resetting prices (`PATCH`/`DELETE /api/pricing`) is restricted to the Default
+workspace owner because prices now change members' quotas.
 
 In Workspace settings → Members, one form accepts a username or email. An
 existing account joins immediately; a new email address creates an invitation
@@ -77,6 +104,9 @@ or perform direct resets; members can redeem only their own reset passes.
    did not call the collector (for example embeddings), without double charging
    chat responses. Responses without token usage are not estimated; media units
    such as seconds/images are not converted into tokens.
+7. `saveRequestUsage()` prices the row once (`usageRepo.calculateCost()`),
+   stores the cost and the standard-token charge, and spends gifts from that
+   charge. The member activity chart and recent list still show raw tokens.
 
 The check uses completed, provider-reported usage. Members may run multiple
 requests concurrently, including through different keys of the same account.
@@ -109,6 +139,9 @@ or foreign ownership falls back to the importing owner.
 
 - `src/lib/db/migrations/003-member-token-limits.js`
 - `src/lib/db/migrations/005-member-gifts.js`
+- `src/lib/db/migrations/007-quota-standard-tokens.js`
+- `src/lib/workspaces/standardTokens.js`
+- `src/lib/workspaces/tokenQuotas.js`
 - `src/lib/db/repos/memberAccessRepo.js`
 - `src/lib/db/repos/memberGiftsRepo.js`
 - `src/lib/db/repos/memberManagementRepo.js`
@@ -122,16 +155,20 @@ or foreign ownership falls back to the importing owner.
 - `src/app/(dashboard)/dashboard/members/page.js`
 - `tests/unit/workspace-member-limits.test.js`
 - `tests/unit/workspace-member-policy.test.js`
+- `tests/unit/member-standard-token-quota.test.js`
 
 ## Upstream merge points
 
 Only these existing files contain small hooks for this feature:
 
-- `src/lib/db/schema.js`: additive member columns, gift table, and indexes.
-- `src/lib/db/migrations/index.js`: registers migrations 003 and 005.
+- `src/lib/db/schema.js`: additive member columns, gift table, indexes, and
+  `usageHistory.quotaInputTokens`/`quotaOutputTokens`.
+- `src/lib/db/migrations/index.js`: registers migrations 003, 005, and 007.
 - `src/lib/workspaces/requestContext.js`: centralized quota check.
-- `src/lib/db/repos/usageRepo.js`: stamps the trusted context `userId` and
-  spends active token gifts in the same transaction as usage history.
+- `src/lib/db/repos/usageRepo.js`: stamps the trusted context `userId`, stores
+  cost and standard-token charge, and spends active token gifts in the same
+  transaction as usage history.
+- `src/app/api/pricing/route.js`: price writes are Default-owner only.
 - `src/lib/db/repos/apiKeysRepo.js`: key ownership and optional owner filters.
 - `src/dashboardGuard.js`: owner/member dashboard allow-list.
 - `src/shared/components/Sidebar.js`: role-specific navigation.

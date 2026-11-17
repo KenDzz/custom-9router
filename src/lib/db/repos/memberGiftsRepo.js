@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
-import { getTokenQuotaBuckets } from "../../workspaces/tokenQuotas.js";
+import { getTokenQuotaBuckets, QUOTA_INPUT_SQL, QUOTA_OUTPUT_SQL } from "../../workspaces/tokenQuotas.js";
 
 export const MAX_GIFT_TOKENS = 1_000_000_000_000;
 export const MAX_RESET_PASSES = 1_000;
@@ -113,7 +113,7 @@ export async function redeemMemberResetGift(workspaceId, userId) {
     const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
     const quotaStart = member.quotaResetAt && member.quotaResetAt > dayStart ? member.quotaResetAt : dayStart;
     const used = db.get(
-      `SELECT COALESCE(SUM(promptTokens + completionTokens), 0) AS tokens
+      `SELECT COALESCE(SUM(${QUOTA_INPUT_SQL} + ${QUOTA_OUTPUT_SQL}), 0) AS tokens
        FROM usageHistory WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp <= ? AND id > ?`,
       [workspaceId, userId, quotaStart, now, Number(member.quotaResetHistoryId || 0)],
     );
@@ -155,7 +155,7 @@ export function chargeTokenGiftsForUsage(db, workspaceId, userId, timestamp, inp
   // Completion order may differ from usage timestamps. Spend the base allowance
   // against every already-committed row for this day, inside the write transaction.
   const prior = db.get(
-    `SELECT COALESCE(SUM(promptTokens), 0) AS input, COALESCE(SUM(completionTokens), 0) AS output
+    `SELECT COALESCE(SUM(${QUOTA_INPUT_SQL}), 0) AS input, COALESCE(SUM(${QUOTA_OUTPUT_SQL}), 0) AS output
      FROM usageHistory WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp < ? AND id > ?`,
     [workspaceId, userId, quotaStart, dayEnd, Number(member.quotaResetHistoryId || 0)],
   );

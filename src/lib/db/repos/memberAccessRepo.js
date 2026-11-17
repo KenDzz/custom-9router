@@ -1,5 +1,5 @@
 import { getAdapter } from "../driver.js";
-import { getTokenQuotaBuckets } from "../../workspaces/tokenQuotas.js";
+import { getTokenQuotaBuckets, QUOTA_INPUT_SQL, QUOTA_OUTPUT_SQL } from "../../workspaces/tokenQuotas.js";
 import { getActiveGiftBalances, listMemberGifts } from "./memberGiftsRepo.js";
 
 function startOfLocalDay(date = new Date()) {
@@ -29,13 +29,15 @@ export async function getMemberTokenStatus(workspaceId, userId) {
   const dayStart = start.toISOString();
   const quotaStart = membership.quotaResetAt && membership.quotaResetAt > dayStart
     ? membership.quotaResetAt : dayStart;
+  // Quota is counted in standard tokens (cost-based, see standardTokens.js);
+  // promptTokens/completionTokens stay raw for display.
   const usage = db.get(
     `SELECT
        COUNT(*) AS requests,
        COALESCE(SUM(promptTokens), 0) AS promptTokens,
        COALESCE(SUM(completionTokens), 0) AS completionTokens,
-       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN promptTokens ELSE 0 END), 0) AS quotaInput,
-       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN completionTokens ELSE 0 END), 0) AS quotaOutput
+       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN ${QUOTA_INPUT_SQL} ELSE 0 END), 0) AS quotaInput,
+       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN ${QUOTA_OUTPUT_SQL} ELSE 0 END), 0) AS quotaOutput
      FROM usageHistory
      WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp < ?`,
     [quotaStart, Number(membership.quotaResetHistoryId || 0), quotaStart, Number(membership.quotaResetHistoryId || 0),

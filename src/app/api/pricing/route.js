@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireDefaultOwner } from "@/lib/auth/workspaceAuth.js";
 import { getPricing, updatePricing, resetPricing, resetAllPricing } from "@/lib/localDb.js";
 import { getDefaultPricing } from "open-sse/providers/pricing.js";
 
@@ -25,6 +26,10 @@ export async function GET() {
  * Body: { provider: { model: { input: number, output: number, cached: number, ... } } }
  */
 export async function PATCH(request) {
+  // Prices decide member quotas (standard tokens), so only the Default
+  // workspace owner may change them.
+  const auth = await requireDefaultOwner(request);
+  if (auth.error) return auth.error;
   try {
     const body = await request.json();
 
@@ -89,6 +94,8 @@ export async function PATCH(request) {
  * Query params: ?provider=xxx&model=yyy (optional)
  */
 export async function DELETE(request) {
+  const auth = await requireDefaultOwner(request);
+  if (auth.error) return auth.error;
   try {
     const { searchParams } = new URL(request.url);
     const provider = searchParams.get("provider");
