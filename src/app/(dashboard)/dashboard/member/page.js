@@ -172,7 +172,6 @@ export default function MemberDashboardPage() {
   }
 
   const token = dashboard?.tokenStatus;
-  const unlimited = !token?.dailyTokenLimit;
 
   return (
     <div className="space-y-6">
@@ -200,30 +199,41 @@ export default function MemberDashboardPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Daily token allowance</p>
-              <div className="mt-2 flex flex-wrap items-baseline gap-2">
-                <span className="text-3xl font-bold tracking-tight text-text-main">{formatNumber(token?.usedTokens)}</span>
-                <span className="text-sm text-text-muted">/ {unlimited ? "Unlimited" : formatNumber(token.dailyTokenLimit)}</span>
-              </div>
               {!!token?.tokenGiftRemaining && <p className="mt-1 text-xs text-brand-500">+ {formatExactNumber(token.tokenGiftRemaining)} gift tokens available</p>}
             </div>
             <div className={`grid size-11 place-items-center rounded-[12px] ${token?.limitReached ? "bg-red-500/10 text-red-500" : "bg-brand-500/10 text-brand-500"}`}>
               <span className="material-symbols-outlined">speed</span>
             </div>
           </div>
-          <div className="mt-6 h-2.5 overflow-hidden rounded-full bg-surface-3">
-            <div
-              className={`h-full rounded-full transition-all ${token?.limitReached ? "bg-red-500" : token?.percentage >= 80 ? "bg-amber-500" : "bg-brand-500"}`}
-              style={{ width: unlimited ? "0%" : `${Math.max(2, token?.percentage || 0)}%` }}
-            />
+          <div className="mt-4 space-y-4">
+            {token?.quotas.map(({ type, limit, used, remaining }) => {
+              const percentage = limit ? Math.min(100, Math.round(100 * used / limit)) : 0;
+              return (
+                <div key={type}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                    <span className="font-medium capitalize">{type} tokens</span>
+                    <span className="text-text-muted">{formatNumber(used)} / {limit ? formatNumber(limit) : "Unlimited"}</span>
+                  </div>
+                  {!!limit && (
+                    <>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-3">
+                        <div className={`h-full rounded-full ${remaining === 0 ? "bg-red-500" : "bg-brand-500"}`}
+                          style={{ width: `${percentage}%` }} />
+                      </div>
+                      <p className="mt-1 text-xs text-text-muted">{formatExactNumber(remaining)} remaining before gifts</p>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div className="mt-3 flex flex-wrap justify-between gap-2 text-xs text-text-muted">
-            <span>{unlimited ? "No daily limit" : `${token.percentage}% used · ${formatNumber(token.remainingTokens)} remaining`}</span>
+          <div className="mt-3 text-xs text-text-muted">
             <span>Resets {token?.resetsAt ? new Date(token.resetsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "at midnight"}</span>
           </div>
           {token?.limitReached && (
             <div className="mt-4 flex items-start gap-2 rounded-[10px] bg-red-500/10 px-3 py-2.5 text-sm text-red-600">
               <span className="material-symbols-outlined text-[18px]">block</span>
-              API requests are paused until the daily limit resets or a gift becomes active.
+              API requests are paused: daily {token.exhaustedQuotaTypes.join(" and ")} token limit reached.
             </div>
           )}
         </Card>

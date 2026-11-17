@@ -6,8 +6,9 @@ import m002 from "./002-workspaces-rbac.js";
 import m003 from "./003-member-token-limits.js";
 import m004 from "./004-invite-token-limits.js";
 import m005 from "./005-member-gifts.js";
+import m006 from "./006-split-token-limits.js";
 
-export const MIGRATIONS = [m001, m002, m003, m004, m005].sort((a, b) => a.version - b.version);
+export const MIGRATIONS = [m001, m002, m003, m004, m005, m006].sort((a, b) => a.version - b.version);
 
 export function latestVersion() {
   return MIGRATIONS.length ? MIGRATIONS[MIGRATIONS.length - 1].version : 0;

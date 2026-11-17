@@ -3,6 +3,7 @@ import { requireWorkspaceRole, requireWorkspaceAdmin } from "@/lib/auth/workspac
 import { getMembers, addMember } from "@/lib/db/repos/workspacesRepo.js";
 import { getUserByIdentifier } from "@/lib/db/repos/usersRepo.js";
 import { WORKSPACE_ROLES, isWorkspaceRole } from "@/lib/workspaces/constants.js";
+import { readSplitTokenLimits } from "@/lib/workspaces/tokenQuotas.js";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,16 @@ export async function POST(request, { params }) {
   const { id } = await params;
   const { error } = await requireWorkspaceAdmin(request, id);
   if (error) return error;
-  const { identifier, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = await request.json();
+  const body = await request.json();
+  const { identifier, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = body;
+  let split;
+  try {
+    split = readSplitTokenLimits(body);
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+  const quotaOptions = Object.keys(split).length ? split
+    : dailyTokenLimit === undefined ? undefined : { dailyTokenLimit };
   if (!isWorkspaceRole(role) || role === WORKSPACE_ROLES.OWNER) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
   }
@@ -29,6 +39,6 @@ export async function POST(request, { params }) {
   }
   const user = await getUserByIdentifier(identifier);
   if (!user) return NextResponse.json({ error: "user not found" }, { status: 404 });
-  await addMember(id, user.id, role, limit === undefined ? undefined : { dailyTokenLimit: limit });
+  await addMember(id, user.id, role, quotaOptions);
   return NextResponse.json({ success: true }, { status: 201 });
 }

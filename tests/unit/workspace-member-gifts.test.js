@@ -55,17 +55,36 @@ function activeWindow() {
   };
 }
 
-async function record(user, tokens) {
+async function record(user, tokens, output = 0) {
   return requestContext.runWithWorkspace({ workspaceId: workspace.id, userId: user.id }, () =>
     usage.saveRequestUsage({
       timestamp: new Date().toISOString(),
       provider: "test",
       model: `gift-test-${sequence}-${tokens}`,
-      tokens: { prompt_tokens: tokens, completion_tokens: 0 },
+      tokens: { prompt_tokens: tokens, completion_tokens: output },
     }));
 }
 
 describe("stackable member gifts", () => {
+  it("charges only overflow from each split limit and resets both quota counters", async () => {
+    const member = await limitedMember();
+    await workspaces.addMember(workspace.id, member.id, "member", { dailyInputTokenLimit: 50, dailyOutputTokenLimit: 20 });
+    await gifts.createMemberGift(workspace.id, member.id, { type: "tokens", amount: 30, ...activeWindow() }, owner.id);
+    await gifts.createMemberGift(workspace.id, member.id, { type: "reset", amount: 1, ...activeWindow() }, owner.id);
+    await record(member, 60, 30);
+    expect(await access.getMemberTokenStatus(workspace.id, member.id)).toMatchObject({
+      tokenGiftRemaining: 10, limitReached: false,
+    });
+    await record(member, 0, 10);
+    expect(await access.getMemberTokenStatus(workspace.id, member.id)).toMatchObject({
+      tokenGiftRemaining: 0, exhaustedQuotaTypes: ["input", "output"], limitReached: true,
+    });
+    await gifts.redeemMemberResetGift(workspace.id, member.id);
+    expect(await access.getMemberTokenStatus(workspace.id, member.id)).toMatchObject({
+      actualUsedToday: 100, tokenGiftRemaining: 0, limitReached: false,
+      quotas: [{ type: "input", used: 0, remaining: 50 }, { type: "output", used: 0, remaining: 20 }],
+    });
+  });
   it("spends the daily limit first, then active token gifts by earliest expiry", async () => {
     const member = await limitedMember();
     const window = activeWindow();

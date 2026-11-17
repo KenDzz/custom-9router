@@ -8,8 +8,8 @@ import Button from "./Button";
 import Input from "./Input";
 import Modal, { ConfirmModal } from "./Modal";
 import Select from "./Select";
-import DailyTokenLimitInput from "./workspaces/DailyTokenLimitInput";
-import { formatDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
+import SplitTokenLimitInputs from "./workspaces/SplitTokenLimitInputs";
+import { formatMemberTokenLimits, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 import { isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 const ROLE_OPTIONS = [
@@ -147,11 +147,14 @@ function WorkspaceManagerModal({
   const [action, setAction] = useState("");
   const [status, setStatus] = useState(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [memberForm, setMemberForm] = useState({ identifier: "", role: "member", dailyTokenLimit: "0" });
+  const [memberForm, setMemberForm] = useState({ identifier: "", role: "member", dailyInputTokenLimit: "0", dailyOutputTokenLimit: "0" });
   const [inviteLink, setInviteLink] = useState("");
 
   const canManage = isWorkspaceAdmin(workspace?.role, currentUser?.id);
   const canRename = canManage || workspace?.role === "owner";
+  const dailyInputTokenLimit = parseDailyTokenLimit(memberForm.dailyInputTokenLimit);
+  const dailyOutputTokenLimit = parseDailyTokenLimit(memberForm.dailyOutputTokenLimit);
+  const invalidLimits = dailyInputTokenLimit === null || dailyOutputTokenLimit === null;
 
   useEffect(() => {
     if (!isOpen || !workspace) return;
@@ -215,16 +218,15 @@ function WorkspaceManagerModal({
     event.preventDefault();
     const identifier = memberForm.identifier.trim();
     if (!identifier) return;
-    const limit = parseDailyTokenLimit(memberForm.dailyTokenLimit);
-    if (limit === null) {
-      setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
+    if (invalidLimits) {
+      setStatus({ type: "error", message: "Enter both daily token limits from 0 to 1,000,000,000,000." });
       return;
     }
     await runAction("add-or-invite", async () => {
       const result = await readResponse(await fetch(`/api/workspaces/${workspace.id}/members/onboard`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier, role: memberForm.role, dailyTokenLimit: limit }),
+        body: JSON.stringify({ identifier, role: memberForm.role, dailyInputTokenLimit, dailyOutputTokenLimit }),
       }));
       if (result.mode === "invited") {
         setInviteLink(`${window.location.origin}/invite?token=${encodeURIComponent(result.invite.token)}`);
@@ -238,7 +240,7 @@ function WorkspaceManagerModal({
       } else {
         throw new Error("Unexpected member onboarding response");
       }
-      setMemberForm({ identifier: "", role: "member", dailyTokenLimit: "0" });
+      setMemberForm({ identifier: "", role: "member", dailyInputTokenLimit: "0", dailyOutputTokenLimit: "0" });
     });
   };
 
@@ -401,7 +403,7 @@ function WorkspaceManagerModal({
                     Existing accounts get access immediately. A new email address gets an invitation link that expires after seven days.
                   </p>
                   <form onSubmit={addOrInviteMember} className="mt-4 space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid gap-3">
                       <Input
                         label="Username or email"
                         placeholder="Username or email"
@@ -409,9 +411,9 @@ function WorkspaceManagerModal({
                         value={memberForm.identifier}
                         onChange={(event) => setMemberForm((current) => ({ ...current, identifier: event.target.value }))}
                       />
-                      <DailyTokenLimitInput
-                        value={memberForm.dailyTokenLimit}
-                        onChange={(dailyTokenLimit) => setMemberForm((current) => ({ ...current, dailyTokenLimit }))}
+                      <SplitTokenLimitInputs
+                        limits={memberForm}
+                        onChange={(limits) => setMemberForm((current) => ({ ...current, ...limits }))}
                       />
                     </div>
                     <div className="flex gap-2">
@@ -422,7 +424,7 @@ function WorkspaceManagerModal({
                         onChange={(event) => setMemberForm((current) => ({ ...current, role: event.target.value }))}
                         className="flex-1"
                       />
-                      <Button type="submit" icon="person_add" loading={action === "add-or-invite"} disabled={!memberForm.identifier.trim() || parseDailyTokenLimit(memberForm.dailyTokenLimit) === null}>
+                      <Button type="submit" icon="person_add" loading={action === "add-or-invite"} disabled={!memberForm.identifier.trim() || invalidLimits}>
                         Add or invite
                       </Button>
                     </div>
@@ -478,7 +480,7 @@ function WorkspaceManagerModal({
                             <p className="truncate text-xs text-text-muted">{member.email || `@${member.username}`}</p>
                             {canRename && member.role !== "owner" && (
                               <p className="text-xs text-text-muted">
-                                Daily limit: {member.dailyTokenLimit ? `${formatDailyTokenLimitInput(member.dailyTokenLimit)} tokens` : "Unlimited"}
+                                Daily limits: {formatMemberTokenLimits(member)}
                               </p>
                             )}
                           </div>
@@ -530,9 +532,9 @@ function WorkspaceManagerModal({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-text-main">{invite.email}</p>
                           <p className="text-xs text-text-muted">Expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
-                          {invite.dailyTokenLimit !== null && (
+                          {(invite.dailyTokenLimit != null || invite.dailyInputTokenLimit != null || invite.dailyOutputTokenLimit != null) && (
                             <p className="text-xs text-text-muted">
-                              Daily limit: {invite.dailyTokenLimit ? `${formatDailyTokenLimitInput(invite.dailyTokenLimit)} tokens` : "Unlimited"}
+                              Daily limits: {formatMemberTokenLimits(invite)}
                             </p>
                           )}
                         </div>

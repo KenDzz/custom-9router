@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { normalizeIdentifier } from "./usersRepo.js";
 import { WORKSPACE_ROLES, ROUTING_TABLES } from "../../workspaces/constants.js";
+import { readSplitTokenLimits } from "../../workspaces/tokenQuotas.js";
 
 function rowToWorkspace(row) {
   if (!row) return null;
@@ -23,6 +24,8 @@ function rowToMember(row) {
     userId: row.userId,
     role: row.role,
     dailyTokenLimit: Number(row.dailyTokenLimit || 0),
+    dailyInputTokenLimit: row.dailyInputTokenLimit ?? null,
+    dailyOutputTokenLimit: row.dailyOutputTokenLimit ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     ...(row.username !== undefined ? { username: row.username } : {}),
@@ -39,6 +42,8 @@ function rowToInvite(row) {
     email: row.email,
     role: row.role,
     dailyTokenLimit: row.dailyTokenLimit == null ? null : Number(row.dailyTokenLimit),
+    dailyInputTokenLimit: row.dailyInputTokenLimit ?? null,
+    dailyOutputTokenLimit: row.dailyOutputTokenLimit ?? null,
     invitedByUserId: row.invitedByUserId,
     expiresAt: row.expiresAt,
     acceptedAt: row.acceptedAt,
@@ -67,13 +72,15 @@ export async function getDefaultWorkspace() {
 export async function getWorkspacesForUser(userId) {
   const db = await getAdapter();
   const rows = db.all(
-    `SELECT w.*, m.role, m.dailyTokenLimit FROM workspaces w JOIN workspaceMembers m ON m.workspaceId = w.id WHERE m.userId = ? ORDER BY w.createdAt ASC`,
+    `SELECT w.*, m.role, m.dailyTokenLimit, m.dailyInputTokenLimit, m.dailyOutputTokenLimit FROM workspaces w JOIN workspaceMembers m ON m.workspaceId = w.id WHERE m.userId = ? ORDER BY w.createdAt ASC`,
     [userId]
   );
   return rows.map((row) => ({
     ...rowToWorkspace(row),
     role: row.role,
     dailyTokenLimit: Number(row.dailyTokenLimit || 0),
+    dailyInputTokenLimit: row.dailyInputTokenLimit ?? null,
+    dailyOutputTokenLimit: row.dailyOutputTokenLimit ?? null,
   }));
 }
 
@@ -138,6 +145,7 @@ export async function countOwners(workspaceId) {
 }
 
 export async function addMember(workspaceId, userId, role, options = {}) {
+  const split = readSplitTokenLimits(options);
   const db = await getAdapter();
   const now = new Date().toISOString();
   const hasLimit = options.dailyTokenLimit !== undefined;
@@ -146,12 +154,14 @@ export async function addMember(workspaceId, userId, role, options = {}) {
     throw new Error("daily token limit must be an integer from 0 to 1,000,000,000,000");
   }
   db.run(
-    `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)
+    `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, dailyInputTokenLimit, dailyOutputTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role,
        dailyTokenLimit = ${hasLimit ? "excluded.dailyTokenLimit" : "workspaceMembers.dailyTokenLimit"},
+       dailyInputTokenLimit = COALESCE(excluded.dailyInputTokenLimit, workspaceMembers.dailyInputTokenLimit),
+       dailyOutputTokenLimit = COALESCE(excluded.dailyOutputTokenLimit, workspaceMembers.dailyOutputTokenLimit),
        updatedAt = excluded.updatedAt
      WHERE workspaceMembers.role != 'owner'`,
-    [workspaceId, userId, role, limit, now, now]
+    [workspaceId, userId, role, limit, split.dailyInputTokenLimit ?? null, split.dailyOutputTokenLimit ?? null, now, now]
   );
 }
 
@@ -207,6 +217,7 @@ export async function removeMember(workspaceId, userId) {
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function createInvite(workspaceId, email, role, invitedByUserId, options = {}) {
+  const split = readSplitTokenLimits(options);
   const db = await getAdapter();
   const now = new Date().toISOString();
   const token = crypto.randomBytes(32).toString("base64url");
@@ -221,6 +232,7 @@ export async function createInvite(workspaceId, email, role, invitedByUserId, op
     email: normalizeIdentifier(email),
     role,
     dailyTokenLimit,
+    ...split,
     tokenHash: hashToken(token),
     invitedByUserId,
     expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString(),
@@ -228,9 +240,10 @@ export async function createInvite(workspaceId, email, role, invitedByUserId, op
     updatedAt: now,
   };
   db.run(
-    `INSERT INTO workspaceInvites(id, workspaceId, email, role, dailyTokenLimit, tokenHash, invitedByUserId, expiresAt, createdAt, updatedAt)
-     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [invite.id, invite.workspaceId, invite.email, invite.role, dailyTokenLimit, invite.tokenHash, invite.invitedByUserId, invite.expiresAt, now, now]
+    `INSERT INTO workspaceInvites(id, workspaceId, email, role, dailyTokenLimit, dailyInputTokenLimit, dailyOutputTokenLimit, tokenHash, invitedByUserId, expiresAt, createdAt, updatedAt)
+     VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [invite.id, invite.workspaceId, invite.email, invite.role, dailyTokenLimit, split.dailyInputTokenLimit ?? null,
+      split.dailyOutputTokenLimit ?? null, invite.tokenHash, invite.invitedByUserId, invite.expiresAt, now, now]
   );
   return { ...rowToInvite(invite), token };
 }
@@ -265,11 +278,15 @@ export async function acceptInvite(inviteId, userId) {
     }
     db.run(`UPDATE workspaceInvites SET acceptedAt = ? WHERE id = ?`, [now, inviteId]);
     db.run(
-      `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)
+      `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, dailyInputTokenLimit, dailyOutputTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role,
-         dailyTokenLimit = COALESCE(?, workspaceMembers.dailyTokenLimit), updatedAt = excluded.updatedAt
+         dailyTokenLimit = COALESCE(?, workspaceMembers.dailyTokenLimit),
+         dailyInputTokenLimit = COALESCE(excluded.dailyInputTokenLimit, workspaceMembers.dailyInputTokenLimit),
+         dailyOutputTokenLimit = COALESCE(excluded.dailyOutputTokenLimit, workspaceMembers.dailyOutputTokenLimit),
+         updatedAt = excluded.updatedAt
        WHERE workspaceMembers.role != 'owner'`,
-      [row.workspaceId, userId, row.role, row.dailyTokenLimit ?? 0, now, now, row.dailyTokenLimit]
+      [row.workspaceId, userId, row.role, row.dailyTokenLimit ?? 0, row.dailyInputTokenLimit,
+        row.dailyOutputTokenLimit, now, now, row.dailyTokenLimit]
     );
   });
 }

@@ -36,6 +36,12 @@ Added `workspaceId TEXT NOT NULL` + indexes to `providerConnections`,
 `(workspaceId, dateKey)`.
 Migration 003 adds `workspaceMembers.dailyTokenLimit`, `apiKeys.userId`, and
 `usageHistory.userId` plus their lookup indexes.
+Migration 006 adds separate nullable input/output limits for memberships and
+invitations. Existing combined limits stay active until both new limits are
+saved. Zero means unlimited for the corresponding bucket. Usage is still
+scoped to the member and workspace across all keys. A request is rejected when
+either capped bucket is already exhausted and no shared gift balance remains;
+actual usage is recorded after the request, so the last request can cross a cap.
 **Invariant:** a merge that adds a new column/table to any of the tables
 above must keep the `workspaceId` column and its indexes intact. A merge
 that adds a brand-new routing table needs a matching `workspaceId NOT NULL`

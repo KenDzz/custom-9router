@@ -321,7 +321,7 @@ async function persistRequestUsage(entry) {
       }
 
       chargeTokenGiftsForUsage(db, workspaceId, record.userId, record.timestamp,
-        Number(promptTokens) + Number(completionTokens));
+          Number(promptTokens), Number(completionTokens));
       db.run(
         `INSERT INTO usageHistory(workspaceId, userId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta)
          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

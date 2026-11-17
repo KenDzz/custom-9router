@@ -1,5 +1,5 @@
 import { getAdapter } from "../driver.js";
-import { WORKSPACE_ROLES } from "../../workspaces/constants.js";
+import { getTokenQuotaBuckets } from "../../workspaces/tokenQuotas.js";
 import { getActiveGiftBalances, listMemberGifts } from "./memberGiftsRepo.js";
 
 function startOfLocalDay(date = new Date()) {
@@ -17,7 +17,7 @@ function toDateKey(date) {
 export async function getMemberTokenStatus(workspaceId, userId) {
   const db = await getAdapter();
   const membership = db.get(
-    `SELECT m.role, m.dailyTokenLimit, m.quotaResetAt, m.quotaResetHistoryId FROM workspaceMembers m
+    `SELECT m.* FROM workspaceMembers m
      JOIN users u ON u.id = m.userId AND u.isActive = 1
      WHERE m.workspaceId = ? AND m.userId = ?`,
     [workspaceId, userId],
@@ -34,27 +34,39 @@ export async function getMemberTokenStatus(workspaceId, userId) {
        COUNT(*) AS requests,
        COALESCE(SUM(promptTokens), 0) AS promptTokens,
        COALESCE(SUM(completionTokens), 0) AS completionTokens,
-       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN promptTokens + completionTokens ELSE 0 END), 0) AS quotaTokens
+       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN promptTokens ELSE 0 END), 0) AS quotaInput,
+       COALESCE(SUM(CASE WHEN timestamp >= ? AND id > ? THEN completionTokens ELSE 0 END), 0) AS quotaOutput
      FROM usageHistory
      WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp < ?`,
-    [quotaStart, Number(membership.quotaResetHistoryId || 0), workspaceId, userId, dayStart, reset.toISOString()],
+    [quotaStart, Number(membership.quotaResetHistoryId || 0), quotaStart, Number(membership.quotaResetHistoryId || 0),
+      workspaceId, userId, dayStart, reset.toISOString()],
   ) || {};
 
-  const limit = membership.role === WORKSPACE_ROLES.OWNER
-    ? 0
-    : Number(membership.dailyTokenLimit || 0);
+  const quotaInput = Number(usage.quotaInput || 0);
+  const quotaOutput = Number(usage.quotaOutput || 0);
+  const quotas = getTokenQuotaBuckets(membership, quotaInput, quotaOutput).map((bucket) => ({
+    ...bucket,
+    remaining: bucket.limit > 0 ? Math.max(0, bucket.limit - bucket.used) : null,
+  }));
+  const legacy = quotas[0].type === "combined";
+  const limit = legacy ? quotas[0].limit : 0;
   const promptTokens = Number(usage.promptTokens || 0);
   const completionTokens = Number(usage.completionTokens || 0);
   const actualUsedToday = promptTokens + completionTokens;
-  const usedTokens = Number(usage.quotaTokens || 0);
+  const usedTokens = quotaInput + quotaOutput;
   const giftBalances = getActiveGiftBalances(db, workspaceId, userId);
   const remainingTokens = limit > 0
     ? Math.max(0, limit - usedTokens) + giftBalances.tokens
     : null;
+  const exhaustedQuotaTypes = giftBalances.tokens > 0 ? []
+    : quotas.filter(({ remaining }) => remaining === 0).map(({ type }) => type);
 
   return {
     role: membership.role,
     dailyTokenLimit: limit,
+    quotas,
+    hasDailyLimit: quotas.some(({ limit }) => limit > 0),
+    exhaustedQuotaTypes,
     usedTokens,
     actualUsedToday,
     promptTokens,
@@ -65,7 +77,7 @@ export async function getMemberTokenStatus(workspaceId, userId) {
     quotaResetAt: membership.quotaResetAt || null,
     remainingTokens,
     percentage: limit > 0 ? Math.min(100, Math.round((usedTokens / (usedTokens + remainingTokens)) * 1000) / 10) : 0,
-    limitReached: limit > 0 && remainingTokens <= 0,
+    limitReached: exhaustedQuotaTypes.length > 0,
     resetsAt: reset.toISOString(),
   };
 }

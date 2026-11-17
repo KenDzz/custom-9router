@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
+import { getTokenQuotaBuckets } from "../../workspaces/tokenQuotas.js";
 
 export const MAX_GIFT_TOKENS = 1_000_000_000_000;
 export const MAX_RESET_PASSES = 1_000;
@@ -105,9 +106,9 @@ export async function redeemMemberResetGift(workspaceId, userId) {
   const db = await getAdapter();
   const now = new Date().toISOString();
   return db.transaction(() => {
-    const member = db.get("SELECT role, dailyTokenLimit, quotaResetAt, quotaResetHistoryId FROM workspaceMembers WHERE workspaceId = ? AND userId = ?", [workspaceId, userId]);
+    const member = db.get("SELECT * FROM workspaceMembers WHERE workspaceId = ? AND userId = ?", [workspaceId, userId]);
     if (!member || member.role === "owner") throw new Error("Member not found or is an owner");
-    if (Number(member.dailyTokenLimit || 0) <= 0) throw new Error("No daily limit to reset");
+    if (!getTokenQuotaBuckets(member).some(({ limit }) => limit > 0)) throw new Error("No daily limit to reset");
     const date = new Date();
     const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString();
     const quotaStart = member.quotaResetAt && member.quotaResetAt > dayStart ? member.quotaResetAt : dayStart;
@@ -137,14 +138,13 @@ export async function redeemMemberResetGift(workspaceId, userId) {
 
 // Called inside the same transaction as the usageHistory insert. Daily tokens
 // are spent first; excess uses active one-time gifts, earliest expiry first.
-export function chargeTokenGiftsForUsage(db, workspaceId, userId, timestamp, tokenCount) {
-  if (!userId || !Number.isFinite(tokenCount) || tokenCount <= 0) return;
+export function chargeTokenGiftsForUsage(db, workspaceId, userId, timestamp, input, output) {
+  if (!userId || !(input > 0 || output > 0)) return;
   const member = db.get(
-    "SELECT role, dailyTokenLimit, quotaResetAt, quotaResetHistoryId FROM workspaceMembers WHERE workspaceId = ? AND userId = ?",
+    "SELECT * FROM workspaceMembers WHERE workspaceId = ? AND userId = ?",
     [workspaceId, userId],
   );
-  const limit = Number(member?.dailyTokenLimit || 0);
-  if (!member || member.role === "owner" || limit <= 0) return;
+  if (!member || !getTokenQuotaBuckets(member).some(({ limit }) => limit > 0)) return;
   if (member.quotaResetAt && timestamp < member.quotaResetAt) return;
 
   const date = new Date(timestamp);
@@ -155,12 +155,15 @@ export function chargeTokenGiftsForUsage(db, workspaceId, userId, timestamp, tok
   // Completion order may differ from usage timestamps. Spend the base allowance
   // against every already-committed row for this day, inside the write transaction.
   const prior = db.get(
-    `SELECT COALESCE(SUM(promptTokens + completionTokens), 0) AS used
+    `SELECT COALESCE(SUM(promptTokens), 0) AS input, COALESCE(SUM(completionTokens), 0) AS output
      FROM usageHistory WHERE workspaceId = ? AND userId = ? AND timestamp >= ? AND timestamp < ? AND id > ?`,
     [workspaceId, userId, quotaStart, dayEnd, Number(member.quotaResetHistoryId || 0)],
   );
-  const baseRemaining = Math.max(0, limit - Number(prior?.used || 0));
-  let giftCharge = Math.max(0, Math.floor(tokenCount) - baseRemaining);
+  const previous = getTokenQuotaBuckets(member, Number(prior?.input || 0), Number(prior?.output || 0));
+  const charges = getTokenQuotaBuckets(member, input, output);
+  let giftCharge = previous.reduce((total, { limit, used }, index) => limit > 0
+    ? total + Math.max(0, Math.floor(charges[index].used) - Math.max(0, limit - used))
+    : total, 0);
   if (!giftCharge) return;
 
   const gifts = db.all(

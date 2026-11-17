@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Avatar, Badge, Button, Card, ConfirmModal, Input, Modal, Select } from "@/shared/components";
 import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
 import TokenSaverPanel from "@/shared/components/workspaces/TokenSaverPanel";
-import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
-import { formatDailyTokenLimitInput, normalizeDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
+import SplitTokenLimitInputs from "@/shared/components/workspaces/SplitTokenLimitInputs";
+import { formatDailyTokenLimitInput, formatMemberTokenLimits, normalizeDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
 import { isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 const ROLE_OPTIONS = [
@@ -13,6 +13,15 @@ const ROLE_OPTIONS = [
   { value: "admin", label: "Admin" },
   { value: "owner", label: "Owner" },
 ];
+
+function quotaForm(member) {
+  const legacy = member.dailyInputTokenLimit == null && member.dailyOutputTokenLimit == null && member.dailyTokenLimit > 0;
+  return {
+    useSplitLimits: !legacy,
+    dailyInputTokenLimit: String(member.dailyInputTokenLimit ?? (legacy ? "" : 0)),
+    dailyOutputTokenLimit: String(member.dailyOutputTokenLimit ?? (legacy ? "" : 0)),
+  };
+}
 
 function formatNumber(value) {
   return new Intl.NumberFormat("en-US", { notation: Number(value) >= 1_000_000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(Number(value || 0));
@@ -57,7 +66,7 @@ export default function MembersPage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState({ type: "", message: "" });
-  const [form, setForm] = useState({ username: "", displayName: "", email: "", role: "member", dailyTokenLimit: "0", newPassword: "" });
+  const [form, setForm] = useState({ username: "", displayName: "", email: "", role: "member", ...quotaForm({}), newPassword: "" });
   const [giftForm, setGiftForm] = useState(newGiftForm);
   const [gifting, setGifting] = useState(false);
   const [resettingUsage, setResettingUsage] = useState(false);
@@ -110,7 +119,7 @@ export default function MembersPage() {
       displayName: member.displayName || "",
       email: member.email || "",
       role: member.role,
-      dailyTokenLimit: String(member.dailyTokenLimit || 0),
+      ...quotaForm(member),
       newPassword: "",
     });
     try {
@@ -121,7 +130,7 @@ export default function MembersPage() {
         displayName: data.user.displayName || "",
         email: data.user.email || "",
         role: data.member.role,
-        dailyTokenLimit: String(data.member.dailyTokenLimit || 0),
+        ...quotaForm(data.member),
         newPassword: "",
       });
     } catch (error) {
@@ -187,9 +196,11 @@ export default function MembersPage() {
   const saveProfile = async (event) => {
     event.preventDefault();
     if (!selected || !workspace) return;
-    const limit = form.role === "owner" ? 0 : parseDailyTokenLimit(form.dailyTokenLimit);
-    if (limit === null) {
-      setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
+    const applySplit = form.role !== "owner" && form.useSplitLimits;
+    const dailyInputTokenLimit = parseDailyTokenLimit(form.dailyInputTokenLimit);
+    const dailyOutputTokenLimit = parseDailyTokenLimit(form.dailyOutputTokenLimit);
+    if (applySplit && (dailyInputTokenLimit === null || dailyOutputTokenLimit === null)) {
+      setStatus({ type: "error", message: "Enter both daily token limits from 0 to 1,000,000,000,000." });
       return;
     }
     setSaving(true);
@@ -206,18 +217,17 @@ export default function MembersPage() {
             ...(form.newPassword ? { newPassword: form.newPassword } : {}),
           } : {}),
           ...(canEditRole && form.role !== selected.role ? { role: form.role } : {}),
-          dailyTokenLimit: limit,
+          ...(applySplit ? { dailyInputTokenLimit, dailyOutputTokenLimit } : {}),
         }),
       }));
       setProfile(data);
       setMembers((current) => current.map((member) => member.userId === selected.userId ? {
         ...member,
         ...data.user,
-        role: form.role,
-        dailyTokenLimit: data.member.dailyTokenLimit,
+        ...data.member,
       } : member));
-      setSelected((current) => ({ ...current, ...data.user, role: form.role, dailyTokenLimit: data.member.dailyTokenLimit }));
-      setForm((current) => ({ ...current, newPassword: "" }));
+      setSelected((current) => ({ ...current, ...data.user, ...data.member }));
+      setForm((current) => ({ ...current, ...quotaForm(data.member), newPassword: "" }));
       setStatus({ type: "success", message: "Member profile updated" });
       if (selected.userId === currentUserId) globalThis.location.reload();
     } catch (error) {
@@ -290,11 +300,11 @@ export default function MembersPage() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-text-main">{member.displayName || member.username}</span>
                   <span className="block truncate text-xs text-text-muted">@{member.username}{member.email ? ` · ${member.email}` : ""}</span>
-                  <span className="block text-xs text-text-muted sm:hidden">{member.role === "owner" || !member.dailyTokenLimit ? "Unlimited" : `${formatNumber(member.dailyTokenLimit)} tokens / day`}</span>
+                  <span className="block text-xs text-text-muted sm:hidden">{formatMemberTokenLimits(member)}</span>
                 </span>
                 <span className="hidden text-right sm:block">
                   <span className="block text-xs font-medium text-text-main">
-                    {member.role === "owner" || !member.dailyTokenLimit ? "Unlimited" : `${formatNumber(member.dailyTokenLimit)} / day`}
+                    {formatMemberTokenLimits(member)}
                   </span>
                   <span className="text-[11px] text-text-muted">Token limit</span>
                 </span>
@@ -330,13 +340,10 @@ export default function MembersPage() {
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   <Metric label="Used today" value={formatNumber(profile.dashboard.tokenStatus.usedTokens)} icon="data_usage" />
                   <Metric label="Total recorded today" value={formatNumber(profile.dashboard.tokenStatus.actualUsedToday)} icon="history" />
-                  <Metric
-                    label="Remaining today"
-                    value={profile.dashboard.tokenStatus.remainingTokens === null
-                      ? "Unlimited"
-                      : formatDailyTokenLimitInput(profile.dashboard.tokenStatus.remainingTokens)}
-                    icon="hourglass_bottom"
-                  />
+                  {profile.dashboard.tokenStatus.quotas.map(({ type, remaining }) => (
+                    <Metric key={type} label={type === "combined" ? "Remaining today" : `${type === "input" ? "Input" : "Output"} remaining`}
+                      value={remaining === null ? "Unlimited" : formatDailyTokenLimitInput(remaining)} icon="hourglass_bottom" />
+                  ))}
                   <Metric label="Requests today" value={formatNumber(profile.dashboard.tokenStatus.requests)} icon="bolt" />
                   <Metric label="Active keys" value={`${profile.dashboard.keys.active}/${profile.dashboard.keys.total}`} icon="vpn_key" />
                 </div>
@@ -357,15 +364,20 @@ export default function MembersPage() {
                 <div className="mb-4 flex items-start gap-3">
                   <span className="material-symbols-outlined rounded-[10px] bg-brand-500/10 p-2 text-brand-500">speed</span>
                   <div>
-                    <h4 className="font-semibold text-text-main">Daily token limit</h4>
-                    <p className="text-xs text-text-muted">Maximum base tokens per day, not the remaining balance. Reset usage sets Used today to zero; Total recorded today and request history stay unchanged. Remaining today also includes active gift tokens. Usage counts input and output tokens across all keys owned by this member.</p>
+                    <h4 className="font-semibold text-text-main">Daily token limits</h4>
+                    <p className="text-xs text-text-muted">Input and output have separate limits. Each limit applies across all API keys this member owns in this workspace. Gift tokens are shared between both limits.</p>
                   </div>
                 </div>
-                <DailyTokenLimitInput
-                  value={form.role === "owner" ? "0" : form.dailyTokenLimit}
-                  onChange={(dailyTokenLimit) => setForm((current) => ({ ...current, dailyTokenLimit }))}
-                  disabled={form.role === "owner"}
-                />
+                {form.role === "owner" ? <p className="text-sm text-text-muted">Owners have unlimited usage.</p>
+                  : form.useSplitLimits ? (
+                    <SplitTokenLimitInputs limits={form} onChange={(limits) => setForm((current) => ({ ...current, ...limits }))} />
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-sm text-text-muted">Current limit: {formatMemberTokenLimits(selected)} tokens per day.</p>
+                      <Button type="button" size="sm" variant="secondary"
+                        onClick={() => setForm((current) => ({ ...current, useSplitLimits: true }))}>Set separate limits</Button>
+                    </div>
+                  )}
               </div>
 
               {form.role !== "owner" && profile?.dashboard && (
@@ -375,7 +387,7 @@ export default function MembersPage() {
                       <h4 className="font-semibold text-text-main">Member gifts</h4>
                       <p className="mt-1 text-xs text-text-muted">One-time tokens and reset passes stack while each gift is active. Resetting the quota counter keeps request history.</p>
                     </div>
-                    <Button type="button" size="sm" variant="secondary" icon="restart_alt" disabled={!profile.dashboard.tokenStatus.dailyTokenLimit || !profile.dashboard.tokenStatus.usedTokens} onClick={() => setResetConfirmOpen(true)}>
+                    <Button type="button" size="sm" variant="secondary" icon="restart_alt" disabled={!profile.dashboard.tokenStatus.hasDailyLimit || !profile.dashboard.tokenStatus.usedTokens} onClick={() => setResetConfirmOpen(true)}>
                       Reset usage now
                     </Button>
                   </div>

@@ -11,6 +11,7 @@ import {
 import { updateMemberProfile } from "@/lib/db/repos/memberManagementRepo.js";
 import { getMemberDashboard } from "@/lib/db/repos/memberAccessRepo.js";
 import { isWorkspaceRole, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
+import { readSplitTokenLimits } from "@/lib/workspaces/tokenQuotas.js";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,11 @@ export async function PATCH(request, { params }) {
   if (!currentMember || !currentUser) return NextResponse.json({ error: "Member not found" }, { status: 404 });
 
   const updates = {};
+  try {
+    Object.assign(updates, readSplitTokenLimits(body));
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   if (body.role !== undefined) {
     if (!isWorkspaceRole(body.role)) return NextResponse.json({ error: "Invalid workspace role" }, { status: 400 });
     updates.role = body.role;

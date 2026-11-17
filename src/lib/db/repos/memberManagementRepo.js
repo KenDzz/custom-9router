@@ -31,8 +31,10 @@ export async function updateMemberProfile(workspaceId, userId, data, actorUserId
         data.email !== undefined ? data.email : user.email, passwordHash ?? user.passwordHash, now, userId],
     );
     db.run(
-      "UPDATE workspaceMembers SET role = ?, dailyTokenLimit = ?, updatedAt = ? WHERE workspaceId = ? AND userId = ?",
-      [role, role === "owner" ? 0 : data.dailyTokenLimit ?? member.dailyTokenLimit, now, workspaceId, userId],
+      "UPDATE workspaceMembers SET role = ?, dailyTokenLimit = ?, dailyInputTokenLimit = ?, dailyOutputTokenLimit = ?, updatedAt = ? WHERE workspaceId = ? AND userId = ?",
+      [role, role === "owner" ? 0 : data.dailyTokenLimit ?? member.dailyTokenLimit,
+        role === "owner" ? null : data.dailyInputTokenLimit ?? member.dailyInputTokenLimit,
+        role === "owner" ? null : data.dailyOutputTokenLimit ?? member.dailyOutputTokenLimit, now, workspaceId, userId],
     );
   });
 }

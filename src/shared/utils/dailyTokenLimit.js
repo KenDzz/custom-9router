@@ -17,3 +17,12 @@ export function parseDailyTokenLimit(value) {
   const limit = Number(text);
   return Number.isSafeInteger(limit) && limit <= MAX_DAILY_TOKEN_LIMIT ? limit : null;
 }
+
+export function formatMemberTokenLimits(member) {
+  const format = (limit) => limit ? formatDailyTokenLimitInput(limit) : "Unlimited";
+  if (member.role === "owner") return "Unlimited";
+  if (member.dailyInputTokenLimit != null || member.dailyOutputTokenLimit != null) {
+    return `Input: ${format(member.dailyInputTokenLimit)} · Output: ${format(member.dailyOutputTokenLimit)}`;
+  }
+  return member.dailyTokenLimit ? `Combined: ${format(member.dailyTokenLimit)}` : "Unlimited";
+}

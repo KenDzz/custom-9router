@@ -82,11 +82,16 @@ export async function withLlmWorkspace(request, callback) {
       const billable = request.method === "POST";
       trackMemberUsage = tokenStatus.role !== "owner";
       if (billable && tokenStatus.limitReached) {
+        const [firstExhausted] = tokenStatus.exhaustedQuotaTypes;
+        const exhaustedQuota = tokenStatus.quotas.find(({ type }) => type === firstExhausted);
         return Response.json({
-          error: "Daily token limit reached",
+          error: tokenStatus.exhaustedQuotaTypes.includes("combined") ? "Daily token limit reached"
+            : `Daily ${tokenStatus.exhaustedQuotaTypes.join(" and ")} token limit reached`,
           code: "daily_token_limit_reached",
-          limit: tokenStatus.dailyTokenLimit,
-          used: tokenStatus.usedTokens,
+          limit: exhaustedQuota.limit,
+          used: exhaustedQuota.used,
+          quotas: tokenStatus.quotas,
+          exhaustedQuotaTypes: tokenStatus.exhaustedQuotaTypes,
           resetsAt: tokenStatus.resetsAt,
         }, { status: 429 });
       }

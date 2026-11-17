@@ -7,14 +7,14 @@ import {
   parseDailyTokenLimit,
 } from "@/shared/utils/dailyTokenLimit";
 
-export default function DailyTokenLimitInput({ value, onChange, disabled = false }) {
+export default function DailyTokenLimitInput({ value, onChange, disabled = false, label = "Daily token limit" }) {
   const invalid = !disabled && parseDailyTokenLimit(value) === null;
   return (
     <Input
       type="text"
       inputMode="numeric"
-      label="Daily token limit"
-      aria-label="Daily token limit"
+      label={label}
+      aria-label={label}
       value={formatDailyTokenLimitInput(value)}
       onChange={(event) => {
         const digits = normalizeDailyTokenLimitInput(event.target.value);

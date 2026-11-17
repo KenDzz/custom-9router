@@ -45,6 +45,19 @@ afterAll(async () => {
 });
 
 describe("workspace RBAC repository invariants", () => {
+  it("carries independent limits from an invitation into its accepted membership", async () => {
+    const workspace = await workspaces.createWorkspace("Split invitation", owner.id);
+    const invite = await workspaces.createInvite(workspace.id, invited.email, "member", owner.id, {
+      dailyInputTokenLimit: 500, dailyOutputTokenLimit: 0,
+    });
+    expect(await workspaces.getPendingInviteByToken(invite.token)).toMatchObject({
+      dailyInputTokenLimit: 500, dailyOutputTokenLimit: 0,
+    });
+    await workspaces.acceptInvite(invite.id, invited.id);
+    expect(await workspaces.getMember(workspace.id, invited.id)).toMatchObject({
+      dailyInputTokenLimit: 500, dailyOutputTokenLimit: 0,
+    });
+  });
   it("applies an owner's invitation quota when the user accepts", async () => {
     const workspace = await workspaces.createWorkspace("Limited invite workspace", owner.id);
     const invite = await workspaces.createInvite(workspace.id, invited.email, "member", owner.id, { dailyTokenLimit: 1_250_000 });
@@ -126,6 +139,26 @@ describe("workspace administration routes", () => {
       json: async () => body,
     };
   }
+
+  it("lets owners and admins replace an existing combined limit and preserves split limits on unrelated edits", async () => {
+    const workspace = await workspaces.createWorkspace("Split member limits", owner.id);
+    const target = await users.createUser({ username: "split-limit-target" });
+    await workspaces.addMember(workspace.id, target.id, "member", { dailyTokenLimit: 400 });
+    await workspaces.addMember(workspace.id, invited.id, "admin");
+    const context = { params: Promise.resolve({ id: workspace.id, userId: target.id }) };
+    const { PATCH } = await import("@/app/api/workspaces/[id]/members/[userId]/profile/route.js");
+    const send = (id, body) => PATCH(request(id, workspace.id, body), context);
+    const invalid = await send(owner.id, { dailyInputTokenLimit: 300 });
+    expect(invalid.status).toBe(400);
+    const ownerUpdate = await send(owner.id, { dailyInputTokenLimit: 300, dailyOutputTokenLimit: 80 });
+    expect(ownerUpdate.status).toBe(200);
+    expect((await ownerUpdate.json()).member).toMatchObject({ dailyInputTokenLimit: 300, dailyOutputTokenLimit: 80 });
+    const adminUpdate = await send(invited.id, { dailyInputTokenLimit: 0, dailyOutputTokenLimit: 90 });
+    expect(adminUpdate.status).toBe(200);
+    const unrelated = await send(invited.id, { displayName: "New name" });
+    expect((await unrelated.json()).member).toMatchObject({ dailyInputTokenLimit: 0, dailyOutputTokenLimit: 90 });
+    expect((await send(target.id, { dailyInputTokenLimit: 0, dailyOutputTokenLimit: 0 })).status).toBe(403);
+  });
 
   it("denies workspace creation and roster changes to an ordinary owner", async () => {
     const workspace = await workspaces.createWorkspace("Owner restrictions", owner.id);

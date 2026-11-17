@@ -43,6 +43,39 @@ afterAll(async () => {
 });
 
 describe("workspace member daily token limits", () => {
+  it("uses separate limits across all keys and blocks only after a capped bucket is exhausted", async () => {
+    const account = await users.createUser({ username: "split-quota-account" });
+    await workspaces.addMember(workspace.id, account.id, "member", {
+      dailyTokenLimit: 1, dailyInputTokenLimit: 0, dailyOutputTokenLimit: 40,
+    });
+    const scope = (fn) => requestContext.runWithWorkspace({ workspaceId: workspace.id, userId: account.id }, fn);
+    const [first, second] = await scope(async () => [
+      await apiKeys.createApiKey("split key one", "test-machine", account.id),
+      await apiKeys.createApiKey("split key two", "test-machine", account.id),
+    ]);
+    const write = (key, output) => scope(() => usage.saveRequestUsage({
+      timestamp: new Date().toISOString(), provider: "test", model: `split-${output}`, apiKey: key,
+      tokens: { prompt_tokens: 1000, completion_tokens: output },
+    }));
+    const call = (key, callback) => requestContext.withLlmWorkspace({
+      method: "POST", headers: new Headers({ authorization: `Bearer ${key}` }),
+      nextUrl: new URL("http://localhost/api/v1/chat/completions"),
+    }, callback);
+    await write(first.key, 18);
+    expect((await call(second.key, () => Response.json({ ok: true }))).status).toBe(200);
+    await write(second.key, 22);
+    const callback = vi.fn(() => Response.json({ ok: true }));
+    const blocked = await call(first.key, callback);
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toMatchObject({
+      exhaustedQuotaTypes: ["output"],
+      quotas: [
+        { type: "input", limit: 0, used: 2000, remaining: null },
+        { type: "output", limit: 40, used: 40, remaining: 0 },
+      ],
+    });
+    expect(callback).not.toHaveBeenCalled();
+  });
   it("sets a quota when adding a member and preserves it when no new quota is supplied", async () => {
     const added = await users.createUser({ username: "new-limited-member", email: "new-limited@example.com" });
     await workspaces.addMember(workspace.id, added.id, "member", { dailyTokenLimit: 1_250_000 });

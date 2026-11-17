@@ -28,6 +28,8 @@ export async function GET(request) {
       email: invite.email,
       role: invite.role,
       dailyTokenLimit: invite.dailyTokenLimit,
+      dailyInputTokenLimit: invite.dailyInputTokenLimit,
+      dailyOutputTokenLimit: invite.dailyOutputTokenLimit,
       expiresAt: invite.expiresAt,
       workspaceName: workspace?.name || "Workspace",
     },

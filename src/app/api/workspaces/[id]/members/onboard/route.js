@@ -3,6 +3,7 @@ import { requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { addMember, createInvite } from "@/lib/db/repos/workspacesRepo.js";
 import { getUserByIdentifier } from "@/lib/db/repos/usersRepo.js";
 import { WORKSPACE_ROLES, isWorkspaceRole } from "@/lib/workspaces/constants.js";
+import { readSplitTokenLimits } from "@/lib/workspaces/tokenQuotas.js";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,16 @@ export async function POST(request, { params }) {
   const { error, user: actor } = await requireWorkspaceAdmin(request, id);
   if (error) return error;
 
-  const { identifier, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = await request.json();
+  const body = await request.json();
+  const { identifier, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = body;
+  let split;
+  try {
+    split = readSplitTokenLimits(body);
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+  const quotaOptions = Object.keys(split).length ? split
+    : dailyTokenLimit === undefined ? undefined : { dailyTokenLimit };
   const value = typeof identifier === "string" ? identifier.trim() : "";
   if (!value) return NextResponse.json({ error: "Username or email required" }, { status: 400 });
   if (!isWorkspaceRole(role) || role === WORKSPACE_ROLES.OWNER) {
@@ -21,7 +31,6 @@ export async function POST(request, { params }) {
     return NextResponse.json({ error: "Daily token limit must be an integer from 0 to 1,000,000,000,000" }, { status: 400 });
   }
 
-  const quotaOptions = dailyTokenLimit === undefined ? undefined : { dailyTokenLimit };
   const existingUser = await getUserByIdentifier(value);
   if (existingUser) {
     await addMember(id, existingUser.id, role, quotaOptions);
