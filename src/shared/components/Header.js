@@ -14,6 +14,7 @@ import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getProviderIconSrc } from "@/shared/utils/providerIcon";
 import { translate } from "@/i18n/runtime";
+import { hasFullWorkspaceDashboard } from "@/lib/workspaces/constants.js";
 
 const getPageInfo = (pathname) => {
   if (!pathname) return { title: "", description: "", breadcrumbs: [] };
@@ -372,7 +373,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
         <HeaderSearch />
         <ThemeToggle />
         <HeaderLanguage />
-        <HeaderMenu onLogout={handleLogout} canManageSystem={currentUser ? workspaces.some((workspace) => workspace.id === activeWorkspaceId && workspace.role === "owner") : !pathname.startsWith("/dashboard/member")} />
+        <HeaderMenu onLogout={handleLogout} canManageSystem={currentUser ? workspaces.some((workspace) => workspace.id === activeWorkspaceId && hasFullWorkspaceDashboard(workspace.role)) : !pathname.startsWith("/dashboard/member")} />
       </div>
     </header>
   );

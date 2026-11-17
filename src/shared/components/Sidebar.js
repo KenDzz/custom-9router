@@ -8,6 +8,7 @@ import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG, UPDATER_CONFIG } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS } from "@/shared/constants/providers";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { hasFullWorkspaceDashboard } from "@/lib/workspaces/constants.js";
 import useSettingsStore from "@/store/settingsStore";
 import Button from "./Button";
 import { ConfirmModal } from "./Modal";
@@ -33,7 +34,6 @@ const navItems = [
 const memberNavItems = [
   { href: "/dashboard/member", label: "My Dashboard", icon: "space_dashboard" },
 ];
-const adminNavItems = navItems.filter(({ href }) => href === "/dashboard/members");
 
 const debugItems = [
   { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
@@ -58,7 +58,7 @@ export default function Sidebar({ onClose }) {
   const { copied, copy } = useCopyToClipboard(2000);
 
   const INSTALL_CMD = UPDATER_CONFIG.installCmdLatest;
-  const isOwner = activeRole === "owner";
+  const showFullDashboard = hasFullWorkspaceDashboard(activeRole);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,15 +81,15 @@ export default function Sidebar({ onClose }) {
   }, []);
 
   useEffect(() => {
-    if (!isOwner) return;
+    if (!showFullDashboard) return;
     useSettingsStore.getState().fetchSettings()
       .then(data => { if (data.enableTranslator) setEnableTranslator(true); })
       .catch(() => {});
-  }, [isOwner]);
+  }, [showFullDashboard]);
 
   // Lazy check for new npm version in background after initial render
   useEffect(() => {
-    if (!isOwner) return;
+    if (!showFullDashboard) return;
     const timer = setTimeout(() => {
       fetch("/api/version")
         .then(res => res.json())
@@ -97,7 +97,7 @@ export default function Sidebar({ onClose }) {
         .catch(() => {});
     }, 2500);
     return () => clearTimeout(timer);
-  }, [isOwner]);
+  }, [showFullDashboard]);
 
   const isActive = (href) => {
     if (href === "/dashboard/endpoint") {
@@ -161,7 +161,7 @@ export default function Sidebar({ onClose }) {
               <span className="text-xs text-text-muted">v{APP_CONFIG.version}</span>
             </div>
           </Link>
-          {isOwner && updateInfo && (
+          {showFullDashboard && updateInfo && (
             <div className="flex flex-col gap-1.5 rounded p-1 -m-1">
               <span className="text-xs font-semibold text-green-600 dark:text-amber-500">
                 ↑ New version available: v{updateInfo.latestVersion}
@@ -189,7 +189,7 @@ export default function Sidebar({ onClose }) {
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">
-          {(isOwner ? navItems : activeRole === "admin" ? adminNavItems : activeRole ? memberNavItems : []).map((item) => (
+          {(showFullDashboard ? navItems : activeRole ? memberNavItems : []).map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -214,7 +214,7 @@ export default function Sidebar({ onClose }) {
           ))}
 
           {/* System section */}
-          {isOwner && <div className="pt-3 mt-2 space-y-0.5">
+          {showFullDashboard && <div className="pt-3 mt-2 space-y-0.5">
             <p className="px-4 text-xs font-semibold text-text-muted/60 uppercase tracking-wider mb-2">
               System
             </p>

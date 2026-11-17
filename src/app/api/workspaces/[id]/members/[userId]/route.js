@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceAdmin, canGrantWorkspaceOwnership } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { getMember, updateMemberRole, removeMember } from "@/lib/db/repos/workspacesRepo.js";
-import { WORKSPACE_ROLES, isWorkspaceRole, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
+import { isWorkspaceRole, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +14,6 @@ export async function PATCH(request, { params }) {
   if (!isWorkspaceRole(role)) return NextResponse.json({ error: "invalid role" }, { status: 400 });
   const target = await getMember(id, userId);
   if (!target) return NextResponse.json({ error: "member not found" }, { status: 404 });
-  if (role === WORKSPACE_ROLES.OWNER && target.role !== role && !(await canGrantWorkspaceOwnership(user.id))) {
-    return NextResponse.json({ error: "Default workspace admin access required to grant ownership" }, { status: 403 });
-  }
   try {
     await updateMemberRole(id, userId, role);
   } catch (e) {

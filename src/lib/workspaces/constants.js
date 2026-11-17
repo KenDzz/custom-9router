@@ -10,7 +10,7 @@ export const WORKSPACE_ROLES = Object.freeze({
 export const WORKSPACE_ROLE_ORDER = Object.freeze({
   [WORKSPACE_ROLES.MEMBER]: 1,
   [WORKSPACE_ROLES.ADMIN]: 2,
-  [WORKSPACE_ROLES.OWNER]: 3,
+  [WORKSPACE_ROLES.OWNER]: 2,
 });
 
 export function isWorkspaceRole(role) {
@@ -23,14 +23,16 @@ export function hasWorkspaceRole(role, minimumRole) {
     && WORKSPACE_ROLE_ORDER[role] >= WORKSPACE_ROLE_ORDER[minimumRole];
 }
 
+// Both roles have the full dashboard. Admin-only roster and workspace
+// lifecycle actions must use isWorkspaceAdmin instead of the dashboard tier.
+export function hasFullWorkspaceDashboard(role) {
+  return hasWorkspaceRole(role, WORKSPACE_ROLES.OWNER);
+}
+
 // The built-in admin has a legacy owner membership. Ordinary owner
 // memberships do not grant authority over workspace membership.
 export function isWorkspaceAdmin(role, userId) {
   return isWorkspaceRole(role) && (role === WORKSPACE_ROLES.ADMIN || userId === MIGRATED_ADMIN_USER_ID);
-}
-
-export function canGrantWorkspaceOwnership(workspaces, userId) {
-  return workspaces.some(({ id, role }) => id === DEFAULT_WORKSPACE_ID && isWorkspaceAdmin(role, userId));
 }
 
 // Tables partitioned by workspaceId — shared by migration 002 (rebuild) and

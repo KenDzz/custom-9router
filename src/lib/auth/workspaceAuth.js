@@ -38,7 +38,7 @@ export async function requireWorkspaceRole(request, workspaceId, minimumRole = W
 }
 
 // Shorthand for system-level actions (global settings, pricing) gated to the
-// owner of the Default workspace.
+// Owner or Admin of the Default workspace.
 export async function requireDefaultOwner(request) {
   return requireWorkspaceRole(request, DEFAULT_WORKSPACE_ID, WORKSPACE_ROLES.OWNER);
 }
@@ -55,11 +55,6 @@ export async function requireActiveWorkspaceAdmin(request) {
   const member = auth.session.activeWorkspaceId
     ? await getMember(auth.session.activeWorkspaceId, auth.user.id) : null;
   return isWorkspaceAdmin(member?.role, auth.user.id) ? auth : forbidden("Admin access required");
-}
-
-export async function canGrantWorkspaceOwnership(userId) {
-  const member = await getMember(DEFAULT_WORKSPACE_ID, userId);
-  return isWorkspaceAdmin(member?.role, userId);
 }
 
 export async function requireWorkspaceManager(request, workspaceId) {

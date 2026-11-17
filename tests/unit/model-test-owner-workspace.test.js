@@ -44,8 +44,15 @@ describe("owner model test workspace", () => {
     expect(mocks.handleChat).toHaveBeenCalledOnce();
   });
 
-  it("does not run a probe for a non-owner", async () => {
+  it("lets an admin run the same probe in the active workspace", async () => {
     mocks.getMember.mockResolvedValue({ role: "admin" });
+
+    expect((await POST(request())).status).toBe(200);
+    expect(mocks.handleChat).toHaveBeenCalledOnce();
+  });
+
+  it("does not run a probe for a member", async () => {
+    mocks.getMember.mockResolvedValue({ role: "member" });
 
     const response = await POST(request());
 

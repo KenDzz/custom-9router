@@ -10,7 +10,7 @@ import Modal, { ConfirmModal } from "./Modal";
 import Select from "./Select";
 import DailyTokenLimitInput from "./workspaces/DailyTokenLimitInput";
 import { formatDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
-import { canGrantWorkspaceOwnership, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
+import { isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -132,7 +132,6 @@ function CreateWorkspaceModal({ isOpen, onClose, onCreate }) {
 }
 
 function WorkspaceManagerModal({
-  canGrantOwnership,
   isOpen,
   onClose,
   workspace,
@@ -464,9 +463,7 @@ function WorkspaceManagerModal({
                   {members.map((member) => {
                     const isSelf = member.userId === currentUser?.id;
                     const canEdit = canManage && !isSelf && member.userId !== MIGRATED_ADMIN_USER_ID;
-                    const roleOptions = canGrantOwnership || member.role === "owner"
-                      ? [...ROLE_OPTIONS, { value: "owner", label: "Owner" }]
-                      : ROLE_OPTIONS;
+                    const roleOptions = [...ROLE_OPTIONS, { value: "owner", label: "Owner" }];
                     return (
                       <div key={member.userId} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
                         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -727,7 +724,6 @@ export default function WorkspaceSwitcher({
       {manageOpen && canOpenManager && (
         <WorkspaceManagerModal
           isOpen
-          canGrantOwnership={canGrantWorkspaceOwnership(workspaces, currentUser?.id)}
           onClose={() => setManageOpen(false)}
           workspace={activeWorkspace}
           currentUser={currentUser}
@@ -744,7 +740,6 @@ RoleBadge.propTypes = { role: PropTypes.string.isRequired };
 InlineStatus.propTypes = { status: PropTypes.shape({ type: PropTypes.string, message: PropTypes.string }) };
 CreateWorkspaceModal.propTypes = { isOpen: PropTypes.bool, onClose: PropTypes.func, onCreate: PropTypes.func };
 WorkspaceManagerModal.propTypes = {
-  canGrantOwnership: PropTypes.bool,
   isOpen: PropTypes.bool,
   onClose: PropTypes.func,
   workspace: PropTypes.object,

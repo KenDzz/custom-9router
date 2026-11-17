@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceManager, canGrantWorkspaceOwnership } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceManager } from "@/lib/auth/workspaceAuth.js";
 import { getMember } from "@/lib/db/repos/workspacesRepo.js";
 import {
   getUserByEmail,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/db/repos/usersRepo.js";
 import { updateMemberProfile } from "@/lib/db/repos/memberManagementRepo.js";
 import { getMemberDashboard } from "@/lib/db/repos/memberAccessRepo.js";
-import { isWorkspaceRole, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID, WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+import { isWorkspaceRole, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -51,9 +51,6 @@ export async function PATCH(request, { params }) {
   const updates = {};
   if (body.role !== undefined) {
     if (!isWorkspaceRole(body.role)) return NextResponse.json({ error: "Invalid workspace role" }, { status: 400 });
-    if (body.role === WORKSPACE_ROLES.OWNER && currentMember.role !== body.role && !(await canGrantWorkspaceOwnership(actor.id))) {
-      return NextResponse.json({ error: "Default workspace admin access required to grant ownership" }, { status: 403 });
-    }
     updates.role = body.role;
   }
   if (body.username !== undefined) {

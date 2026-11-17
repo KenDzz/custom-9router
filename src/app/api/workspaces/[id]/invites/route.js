@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceRole, requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { getInvitesForWorkspace, createInvite } from "@/lib/db/repos/workspacesRepo.js";
 import { WORKSPACE_ROLES, isWorkspaceRole } from "@/lib/workspaces/constants.js";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request, { params }) {
   const { id } = await params;
-  const { error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
+  const { error } = await requireWorkspaceAdmin(request, id);
   if (error) return error;
   // Raw token only ever exists at creation time — list responses carry no token/hash.
   const invites = (await getInvitesForWorkspace(id)).map(({ tokenHash, ...rest }) => rest);

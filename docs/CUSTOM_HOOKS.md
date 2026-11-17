@@ -107,13 +107,14 @@ against a migrated DB.
 bypassed by `requireLogin=false` or the CLI token, because RBAC actions need
 a real user identity to attribute to. Changed `extractApiKey` from private
 to `export`ed so `requestContext.js` can reuse it.
-Member sessions are deny-by-default for dashboard pages/APIs; owners retain
-the existing upstream surface while members use `/dashboard/member` and
+Member sessions are deny-by-default for dashboard pages/APIs; admins and owners use
+the full dashboard while members use `/dashboard/member` and
 `/api/member/**`. Within Workspace, only an admin can create a workspace,
 manage invitations, or add, remove and change the roles of members. An ordinary
 owner can still manage quotas and routing. The built-in admin retains Workspace
-administration despite its legacy `owner` membership. Only Default workspace
-admins can grant the `owner` role, which also unlocks the upstream dashboard.
+administration despite its legacy `owner` membership. Admins can grant the
+`owner` role within workspaces they administer. Operations that require
+membership in the Default workspace retain that scope.
 New OIDC and SAML users start as members until explicitly promoted.
 **Invariant:** `WORKSPACE_PROTECTED_PATHS` must be checked before the
 `requireLogin=false`/local-bypass logic, never after. A merge that adds new

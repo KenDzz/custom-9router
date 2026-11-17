@@ -3,7 +3,7 @@ import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getDashboardAuthSession, verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { isMemberApiAllowed, isMemberPageAllowed } from "@/lib/workspaces/memberPolicy.js";
-import { isWorkspaceAdmin } from "@/lib/workspaces/constants.js";
+import { hasFullWorkspaceDashboard, isWorkspaceAdmin } from "@/lib/workspaces/constants.js";
 import { usesInitialPassword, isPasswordSession } from "@/lib/auth/passwordPolicy.js";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 
@@ -253,11 +253,10 @@ export async function proxy(request) {
       ? NextResponse.json({ error: "Password change required", mustChangePassword: true }, { status: 403 })
       : NextResponse.redirect(new URL("/login", request.url));
   }
-  const workspaceAdminRoute = membership?.isWorkspaceAdmin && (creatingWorkspace || pathname.startsWith("/api/workspaces/"));
   if (creatingWorkspace && membership && !membership.isWorkspaceAdmin) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
-  if (dashboardApi && membership && membership.role !== "owner" && !workspaceAdminRoute
+  if (dashboardApi && membership && !hasFullWorkspaceDashboard(membership.role)
     && !isMemberApiAllowed(pathname, request.method)) {
     return NextResponse.json({ error: "Owner access required" }, { status: 403 });
   }
@@ -323,14 +322,12 @@ export async function proxy(request) {
       // On error, keep defaults (require login, block tunnel)
     }
 
-    // Use the current workspace role so a role change also takes effect when
-    // the browser reloads a page from the user's previous dashboard.
-    if (membership && membership.role !== "owner") {
-      const admin = membership.isWorkspaceAdmin;
-      const landing = admin ? "/dashboard/members" : "/dashboard/member";
-      if (admin ? pathname !== landing : !isMemberPageAllowed(pathname)) {
-        return NextResponse.redirect(new URL(landing, request.url));
-      }
+    if (membership && !hasFullWorkspaceDashboard(membership.role) && !isMemberPageAllowed(pathname)) {
+      return NextResponse.redirect(new URL("/dashboard/member", request.url));
+    }
+    // An upgraded user can still have the old Member dashboard open.
+    if (hasFullWorkspaceDashboard(membership?.role) && isMemberPageAllowed(pathname)) {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
     // If login not required, allow through

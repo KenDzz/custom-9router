@@ -172,4 +172,13 @@ describe("workspace administration routes", () => {
     const response = await POST(request(MIGRATED_ADMIN_USER_ID, DEFAULT_WORKSPACE_ID, { name: "Built-in admin workspace" }));
     expect(response.status).toBe(201);
   });
+
+  it("inherits Default workspace privileges only with a manager role in Default", async () => {
+    const { requireDefaultOwner } = await import("@/lib/auth/workspaceAuth.js");
+    const scoped = await workspaces.createWorkspace("Scoped administrator", invited.id, "admin");
+    await workspaces.addMember(DEFAULT_WORKSPACE_ID, invited.id, "member");
+    expect((await requireDefaultOwner(request(invited.id, scoped.id))).error.status).toBe(403);
+    await workspaces.updateMemberRole(DEFAULT_WORKSPACE_ID, invited.id, "admin");
+    expect((await requireDefaultOwner(request(invited.id, DEFAULT_WORKSPACE_ID))).member.role).toBe("admin");
+  });
 });

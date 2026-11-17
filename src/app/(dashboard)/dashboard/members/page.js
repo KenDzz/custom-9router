@@ -6,7 +6,7 @@ import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
 import TokenSaverPanel from "@/shared/components/workspaces/TokenSaverPanel";
 import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
 import { formatDailyTokenLimitInput, normalizeDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
-import { canGrantWorkspaceOwnership, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
+import { isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -49,7 +49,6 @@ async function readResponse(response) {
 export default function MembersPage() {
   const [workspace, setWorkspace] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [canGrantOwnership, setCanGrantOwnership] = useState(false);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -78,7 +77,6 @@ export default function MembersPage() {
       }
       setWorkspace(active);
       setCurrentUserId(me.user?.id || null);
-      setCanGrantOwnership(canGrantWorkspaceOwnership(me.workspaces || [], me.user?.id));
       const data = await readResponse(await fetch(`/api/workspaces/${active.id}/members`, { cache: "no-store" }));
       setMembers(data.members || []);
     } catch (error) {
@@ -351,7 +349,7 @@ export default function MembersPage() {
                   <Input label="Email" aria-label="Email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
                 </>}
                 {canEditRole && (
-                  <Select label="Workspace role" aria-label="Workspace role" options={canGrantOwnership || selected.role === "owner" ? ROLE_OPTIONS : ROLE_OPTIONS.filter(({ value }) => value !== "owner")} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} />
+                  <Select label="Workspace role" aria-label="Workspace role" options={ROLE_OPTIONS} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} />
                 )}
               </div>
 
