@@ -3,6 +3,7 @@ import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { getDashboardAuthSession, verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { isMemberApiAllowed, isMemberPageAllowed } from "@/lib/workspaces/memberPolicy.js";
+import { isWorkspaceAdmin } from "@/lib/workspaces/constants.js";
 import { usesInitialPassword, isPasswordSession } from "@/lib/auth/passwordPolicy.js";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
 
@@ -194,7 +195,8 @@ async function getActiveMembership(request) {
   const member = session.activeWorkspaceId ? await getMember(session.activeWorkspaceId, session.userId) : null;
   const mustChangePassword = !isLocalRequest(request) && isPasswordSession(session)
     && await usesInitialPassword(user);
-  return { ...(member || { role: "member" }), mustChangePassword };
+  return { ...(member || { role: "member" }), mustChangePassword,
+    isWorkspaceAdmin: isWorkspaceAdmin(member?.role, user.id) };
 }
 
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
@@ -237,6 +239,7 @@ export async function proxy(request) {
   const alwaysProtected = ALWAYS_PROTECTED.some((p) => pathname.startsWith(p));
   const dashboardApi = pathname.startsWith("/api/")
     && !isPublicLlmApi(pathname) && (!isPublicApi(pathname) || alwaysProtected);
+  const creatingWorkspace = pathname === "/api/workspaces" && request.method === "POST";
   const membership = (dashboardApi || pathname.startsWith("/dashboard"))
     ? await getActiveMembership(request)
     : null;
@@ -250,7 +253,11 @@ export async function proxy(request) {
       ? NextResponse.json({ error: "Password change required", mustChangePassword: true }, { status: 403 })
       : NextResponse.redirect(new URL("/login", request.url));
   }
-  if (dashboardApi && membership && membership.role !== "owner"
+  const workspaceAdminRoute = membership?.isWorkspaceAdmin && (creatingWorkspace || pathname.startsWith("/api/workspaces/"));
+  if (creatingWorkspace && membership && !membership.isWorkspaceAdmin) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
+  if (dashboardApi && membership && membership.role !== "owner" && !workspaceAdminRoute
     && !isMemberApiAllowed(pathname, request.method)) {
     return NextResponse.json({ error: "Owner access required" }, { status: 403 });
   }
@@ -316,9 +323,14 @@ export async function proxy(request) {
       // On error, keep defaults (require login, block tunnel)
     }
 
-    // Signed-in members keep their restricted surface even in local no-login mode.
-    if (membership && membership.role !== "owner" && !isMemberPageAllowed(pathname)) {
-      return NextResponse.redirect(new URL("/dashboard/member", request.url));
+    // Use the current workspace role so a role change also takes effect when
+    // the browser reloads a page from the user's previous dashboard.
+    if (membership && membership.role !== "owner") {
+      const admin = membership.isWorkspaceAdmin;
+      const landing = admin ? "/dashboard/members" : "/dashboard/member";
+      if (admin ? pathname !== landing : !isMemberPageAllowed(pathname)) {
+        return NextResponse.redirect(new URL(landing, request.url));
+      }
     }
 
     // If login not required, allow through

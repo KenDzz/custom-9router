@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceRole } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceRole, requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { getWorkspaceById, renameWorkspace, deleteWorkspace } from "@/lib/db/repos/workspacesRepo.js";
 import { WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
@@ -29,7 +29,7 @@ export async function PATCH(request, { params }) {
 
 export async function DELETE(request, { params }) {
   const { id } = await params;
-  const { error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.OWNER);
+  const { error } = await requireWorkspaceAdmin(request, id);
   if (error) return error;
   try {
     await deleteWorkspace(id);

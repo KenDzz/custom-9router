@@ -23,6 +23,16 @@ export function hasWorkspaceRole(role, minimumRole) {
     && WORKSPACE_ROLE_ORDER[role] >= WORKSPACE_ROLE_ORDER[minimumRole];
 }
 
+// The built-in admin has a legacy owner membership. Ordinary owner
+// memberships do not grant authority over workspace membership.
+export function isWorkspaceAdmin(role, userId) {
+  return isWorkspaceRole(role) && (role === WORKSPACE_ROLES.ADMIN || userId === MIGRATED_ADMIN_USER_ID);
+}
+
+export function canGrantWorkspaceOwnership(workspaces, userId) {
+  return workspaces.some(({ id, role }) => id === DEFAULT_WORKSPACE_ID && isWorkspaceAdmin(role, userId));
+}
+
 // Tables partitioned by workspaceId — shared by migration 002 (rebuild) and
 // workspacesRepo (cascade delete). Keep in sync with schema.js TABLES.
 export const ROUTING_TABLES = Object.freeze([

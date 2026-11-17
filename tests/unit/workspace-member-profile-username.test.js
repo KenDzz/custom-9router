@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ requireWorkspaceRole: vi.fn() }));
-vi.mock("@/lib/auth/workspaceAuth.js", () => ({ requireWorkspaceRole: mocks.requireWorkspaceRole }));
+const mocks = vi.hoisted(() => ({ requireWorkspaceManager: vi.fn() }));
+vi.mock("@/lib/auth/workspaceAuth.js", () => ({ requireWorkspaceManager: mocks.requireWorkspaceManager }));
 vi.mock("next/headers", () => ({ cookies: vi.fn(async () => ({})) }));
 vi.mock("@/lib/auth/dashboardSession.js", () => ({
   setDashboardAuthCookie: vi.fn(), getDashboardAuthSession: vi.fn(async () => null),
@@ -32,8 +32,8 @@ beforeAll(async () => {
   patch = (await import("../../src/app/api/workspaces/[id]/members/[userId]/profile/route.js")).PATCH;
   await db.initDb();
   owner = await users.createUser({ username: "profile-owner", email: "owner@example.com" });
-  workspace = await workspaces.createWorkspace("Username compatibility", owner.id);
-  mocks.requireWorkspaceRole.mockResolvedValue({ user: owner });
+  workspace = await workspaces.createWorkspace("Username compatibility", owner.id, "admin");
+  mocks.requireWorkspaceManager.mockResolvedValue({ user: owner, member: { role: "admin" } });
 });
 
 afterAll(async () => {

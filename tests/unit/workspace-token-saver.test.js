@@ -127,14 +127,14 @@ describe("Token Saver inheritance", () => {
   });
 });
 
-describe("Owner-only Token Saver API", () => {
-  it.each(["GET", "PATCH"])("denies %s to Member and Admin despite stale claims", async (method) => {
-    for (const role of ["member", "admin"]) {
-      await workspaces.updateMemberRole(workspace.id, member.id, role);
-      for (const userId of [undefined, member.id]) {
-        expect((await routes.handleTokenSaver(apiRequest("member", method, method === "PATCH" ? {} : undefined), params(userId))).status).toBe(403);
-      }
+describe("Workspace manager Token Saver API", () => {
+  it.each(["GET", "PATCH"])("uses the current membership role for %s despite stale claims", async (method) => {
+    await workspaces.updateMemberRole(workspace.id, member.id, "member");
+    for (const userId of [undefined, member.id]) {
+      expect((await routes.handleTokenSaver(apiRequest("member", method, method === "PATCH" ? {} : undefined), params(userId))).status).toBe(403);
     }
+    await workspaces.updateMemberRole(workspace.id, member.id, "admin");
+    expect((await routes.handleTokenSaver(apiRequest("member", method, method === "PATCH" ? {} : undefined), params(member.id))).status).toBe(200);
   });
   it("permits Owner edits, reports effective sources and exposes no secrets", async () => {
     expect((await routes.handleTokenSaver(apiRequest("owner", "PATCH", { rtkEnabled: true }), params())).status).toBe(200);

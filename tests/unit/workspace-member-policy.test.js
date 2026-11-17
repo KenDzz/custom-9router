@@ -88,14 +88,32 @@ describe("member access enforced before legacy bypasses", () => {
   it("does not allow a member to create an unrestricted owner workspace", async () => {
     expect((await proxy(request("/api/workspaces", "POST"))).status).toBe(403);
   });
+  it("keeps workspace administration available to admins without opening system settings", async () => {
+    mocks.getMember.mockResolvedValue({ role: "admin" });
+    expect((await proxy(request("/api/workspaces", "POST"))).status).toBe(200);
+    expect((await proxy(request("/api/workspaces/workspace/members", "POST"))).status).toBe(200);
+    expect((await proxy(request("/dashboard/members"))).status).toBe(200);
+    expect((await proxy(request("/api/settings", "PATCH"))).status).toBe(403);
+  });
   it("redirects restricted pages even with requireLogin disabled", async () => {
     const response = await proxy(request("/dashboard/members"));
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toContain("/dashboard/member");
+    expect(response.headers.get("location")).toBe("http://localhost:20127/dashboard/member");
+  });
+  it("opens workspace administration after promotion without requiring a new session", async () => {
+    expect((await proxy(request("/dashboard/member"))).status).toBe(200);
+    mocks.getMember.mockResolvedValue({ role: "admin" });
+    for (const pathname of ["/dashboard", "/dashboard/member", "/dashboard/providers"]) {
+      const response = await proxy(request(pathname));
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe("http://localhost:20127/dashboard/members");
+    }
+    expect((await proxy(request("/dashboard/members"))).status).toBe(200);
   });
   it("preserves owner access", async () => {
     mocks.getMember.mockResolvedValue({ role: "owner" });
     expect((await proxy(request("/api/providers"))).status).toBe(200);
+    expect((await proxy(request("/dashboard"))).status).toBe(200);
   });
   it("fails closed for revoked membership and inactive accounts", async () => {
     mocks.getMember.mockResolvedValue(null);

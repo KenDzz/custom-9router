@@ -63,10 +63,8 @@ async function resolveOidcUser({ issuer, payload }) {
     oidcIssuer: issuer,
     oidcSubject: subject,
   });
-  // Before workspaces, every successful OIDC login could manage providers.
-  // Preserve that capability for newly-provisioned identities without granting
-  // system-owner privileges over global settings or the Default workspace.
-  await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.ADMIN);
+  // Workspace admin authority must be granted explicitly after provisioning.
+  await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.MEMBER);
   return user;
 }
 
@@ -127,7 +125,7 @@ export async function GET(request) {
     const user = await resolveOidcUser({ issuer: discoveredIssuer, payload });
     let memberships = await getWorkspacesForUser(user.id);
     if (memberships.length === 0) {
-      await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.ADMIN);
+      await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.MEMBER);
       memberships = await getWorkspacesForUser(user.id);
     }
     const activeWorkspace = memberships.find((workspace) => workspace.isDefault) || memberships[0];

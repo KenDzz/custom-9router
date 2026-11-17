@@ -33,6 +33,7 @@ const navItems = [
 const memberNavItems = [
   { href: "/dashboard/member", label: "My Dashboard", icon: "space_dashboard" },
 ];
+const adminNavItems = navItems.filter(({ href }) => href === "/dashboard/members");
 
 const debugItems = [
   { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
@@ -188,7 +189,7 @@ export default function Sidebar({ onClose }) {
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">
-          {(isOwner ? navItems : activeRole ? memberNavItems : []).map((item) => (
+          {(isOwner ? navItems : activeRole === "admin" ? adminNavItems : activeRole ? memberNavItems : []).map((item) => (
             <Link
               key={item.href}
               href={item.href}

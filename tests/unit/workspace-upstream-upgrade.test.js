@@ -86,7 +86,7 @@ describe("v0.5.111 and custom workspace integration", () => {
     expect(nextLogin.user.id).toBe(firstLogin.user.id);
     expect(nextLogin.user.displayName).toBe("Updated User");
     const { getMember } = await import("@/lib/db/repos/workspacesRepo.js");
-    expect((await getMember(nextLogin.activeWorkspaceId, nextLogin.user.id)).role).toBe("admin");
+    expect((await getMember(nextLogin.activeWorkspaceId, nextLogin.user.id)).role).toBe("member");
     const { isPasswordSession } = await import("@/lib/auth/passwordPolicy.js");
     expect(isPasswordSession({ loginMethod: "saml", saml: true })).toBe(false);
   });

@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../../src/app/api/workspaces/[id]/members/onboard/route.js";
 
 const mocks = vi.hoisted(() => ({
-  requireWorkspaceRole: vi.fn(),
+  requireWorkspaceAdmin: vi.fn(),
   getUserByIdentifier: vi.fn(),
   addMember: vi.fn(),
   createInvite: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/workspaceAuth.js", () => ({ requireWorkspaceRole: mocks.requireWorkspaceRole }));
+vi.mock("@/lib/auth/workspaceAuth.js", () => ({ requireWorkspaceAdmin: mocks.requireWorkspaceAdmin }));
 vi.mock("@/lib/db/repos/usersRepo.js", () => ({ getUserByIdentifier: mocks.getUserByIdentifier }));
 vi.mock("@/lib/db/repos/workspacesRepo.js", () => ({ addMember: mocks.addMember, createInvite: mocks.createInvite }));
 
@@ -25,7 +25,7 @@ function request(body) {
 describe("unified member onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireWorkspaceRole.mockResolvedValue({ user: { id: "owner-1" }, member: { role: "owner" } });
+    mocks.requireWorkspaceAdmin.mockResolvedValue({ user: { id: "admin-1" }, member: { role: "admin" } });
     mocks.createInvite.mockResolvedValue({ id: "invite-1", token: "raw-token" });
   });
 
@@ -45,7 +45,7 @@ describe("unified member onboarding", () => {
 
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ mode: "invited", invite: { token: "raw-token" } });
-    expect(mocks.createInvite).toHaveBeenCalledWith("workspace-1", "new@example.com", "admin", "owner-1", { dailyTokenLimit: 500 });
+    expect(mocks.createInvite).toHaveBeenCalledWith("workspace-1", "new@example.com", "admin", "admin-1", { dailyTokenLimit: 500 });
     expect(mocks.addMember).not.toHaveBeenCalled();
   });
 
@@ -58,13 +58,8 @@ describe("unified member onboarding", () => {
     expect(mocks.createInvite).not.toHaveBeenCalled();
   });
 
-  it("lets an admin add or invite without a quota but rejects quota changes", async () => {
-    mocks.requireWorkspaceRole.mockResolvedValue({ user: { id: "admin-1" }, member: { role: "admin" } });
+  it("lets an admin invite without a quota", async () => {
     mocks.getUserByIdentifier.mockResolvedValue(null);
-
-    const denied = await POST(request({ identifier: "new@example.com", dailyTokenLimit: 10 }), context);
-    expect(denied.status).toBe(403);
-    expect(mocks.createInvite).not.toHaveBeenCalled();
 
     const allowed = await POST(request({ identifier: "new@example.com" }), context);
     expect(allowed.status).toBe(201);

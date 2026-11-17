@@ -231,7 +231,7 @@ describe("workspace member daily token limits", () => {
     const { updateMemberProfile } = await import("@/lib/db/repos/memberManagementRepo.js");
     const other = await workspaces.createWorkspace("Other owned workspace", member.id);
     await expect(updateMemberProfile(workspace.id, member.id, { newPassword: "TakeoverPassword123!" }, owner.id))
-      .rejects.toThrow("owner in another workspace");
+      .rejects.toThrow("protected owner or admin");
     await updateMemberProfile(workspace.id, member.id, { dailyTokenLimit: 200 }, owner.id);
     expect((await workspaces.getMember(workspace.id, member.id)).dailyTokenLimit).toBe(200);
     expect((await workspaces.getMember(other.id, member.id)).role).toBe("owner");

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceRole } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceRole, requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { getMembers, addMember } from "@/lib/db/repos/workspacesRepo.js";
 import { getUserByIdentifier } from "@/lib/db/repos/usersRepo.js";
 import { WORKSPACE_ROLES, isWorkspaceRole } from "@/lib/workspaces/constants.js";
@@ -14,18 +14,14 @@ export async function GET(request, { params }) {
   return NextResponse.json({ members });
 }
 
-// Directly adds an existing user (no invite round-trip) — admin+ only, and
-// never as owner: ownership is granted via updateMemberRole by an existing owner.
+// Directly adds an existing user. Grant ownership through the role endpoint.
 export async function POST(request, { params }) {
   const { id } = await params;
-  const { error, member } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
+  const { error } = await requireWorkspaceAdmin(request, id);
   if (error) return error;
   const { identifier, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = await request.json();
   if (!isWorkspaceRole(role) || role === WORKSPACE_ROLES.OWNER) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
-  }
-  if (dailyTokenLimit !== undefined && member.role !== WORKSPACE_ROLES.OWNER) {
-    return NextResponse.json({ error: "Owner access required to set a daily token limit" }, { status: 403 });
   }
   const limit = dailyTokenLimit;
   if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000_000_000_000)) {

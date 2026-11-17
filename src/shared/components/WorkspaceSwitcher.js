@@ -10,6 +10,7 @@ import Modal, { ConfirmModal } from "./Modal";
 import Select from "./Select";
 import DailyTokenLimitInput from "./workspaces/DailyTokenLimitInput";
 import { formatDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
+import { canGrantWorkspaceOwnership, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -131,6 +132,7 @@ function CreateWorkspaceModal({ isOpen, onClose, onCreate }) {
 }
 
 function WorkspaceManagerModal({
+  canGrantOwnership,
   isOpen,
   onClose,
   workspace,
@@ -149,8 +151,8 @@ function WorkspaceManagerModal({
   const [memberForm, setMemberForm] = useState({ identifier: "", role: "member", dailyTokenLimit: "0" });
   const [inviteLink, setInviteLink] = useState("");
 
-  const canManage = workspace?.role === "owner" || workspace?.role === "admin";
-  const isOwner = workspace?.role === "owner";
+  const canManage = isWorkspaceAdmin(workspace?.role, currentUser?.id);
+  const canRename = canManage || workspace?.role === "owner";
 
   useEffect(() => {
     if (!isOpen || !workspace) return;
@@ -214,8 +216,8 @@ function WorkspaceManagerModal({
     event.preventDefault();
     const identifier = memberForm.identifier.trim();
     if (!identifier) return;
-    const limit = isOwner ? parseDailyTokenLimit(memberForm.dailyTokenLimit) : undefined;
-    if (isOwner && limit === null) {
+    const limit = parseDailyTokenLimit(memberForm.dailyTokenLimit);
+    if (limit === null) {
       setStatus({ type: "error", message: "Enter a daily token limit from 0 to 1,000,000,000,000." });
       return;
     }
@@ -342,11 +344,11 @@ function WorkspaceManagerModal({
                     label="Name"
                     value={name}
                     onChange={(event) => setName(event.target.value)}
-                    disabled={!canManage}
+                    disabled={!canRename}
                     maxLength={80}
                     className="flex-1"
                   />
-                  {canManage && (
+                  {canRename && (
                     <Button type="submit" variant="secondary" loading={action === "rename"} disabled={!name.trim() || name.trim() === workspace.name}>
                       Save changes
                     </Button>
@@ -372,7 +374,7 @@ function WorkspaceManagerModal({
                 </div>
               </section>
 
-              {isOwner && (
+              {canManage && (
                 <section className="rounded-[14px] border border-red-500/20 bg-red-500/[0.03] p-5">
                   <h4 className="font-semibold text-red-600 dark:text-red-400">Danger zone</h4>
                   <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -400,7 +402,7 @@ function WorkspaceManagerModal({
                     Existing accounts get access immediately. A new email address gets an invitation link that expires after seven days.
                   </p>
                   <form onSubmit={addOrInviteMember} className="mt-4 space-y-3">
-                    <div className={`grid gap-3 ${isOwner ? "sm:grid-cols-2" : ""}`}>
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <Input
                         label="Username or email"
                         placeholder="Username or email"
@@ -408,12 +410,10 @@ function WorkspaceManagerModal({
                         value={memberForm.identifier}
                         onChange={(event) => setMemberForm((current) => ({ ...current, identifier: event.target.value }))}
                       />
-                      {isOwner && (
-                        <DailyTokenLimitInput
-                          value={memberForm.dailyTokenLimit}
-                          onChange={(dailyTokenLimit) => setMemberForm((current) => ({ ...current, dailyTokenLimit }))}
-                        />
-                      )}
+                      <DailyTokenLimitInput
+                        value={memberForm.dailyTokenLimit}
+                        onChange={(dailyTokenLimit) => setMemberForm((current) => ({ ...current, dailyTokenLimit }))}
+                      />
                     </div>
                     <div className="flex gap-2">
                       <Select
@@ -423,7 +423,7 @@ function WorkspaceManagerModal({
                         onChange={(event) => setMemberForm((current) => ({ ...current, role: event.target.value }))}
                         className="flex-1"
                       />
-                      <Button type="submit" icon="person_add" loading={action === "add-or-invite"} disabled={!memberForm.identifier.trim() || (isOwner && parseDailyTokenLimit(memberForm.dailyTokenLimit) === null)}>
+                      <Button type="submit" icon="person_add" loading={action === "add-or-invite"} disabled={!memberForm.identifier.trim() || parseDailyTokenLimit(memberForm.dailyTokenLimit) === null}>
                         Add or invite
                       </Button>
                     </div>
@@ -463,8 +463,8 @@ function WorkspaceManagerModal({
                   )}
                   {members.map((member) => {
                     const isSelf = member.userId === currentUser?.id;
-                    const canEdit = canManage && !isSelf && (isOwner || member.role !== "owner");
-                    const roleOptions = isOwner
+                    const canEdit = canManage && !isSelf && member.userId !== MIGRATED_ADMIN_USER_ID;
+                    const roleOptions = canGrantOwnership || member.role === "owner"
                       ? [...ROLE_OPTIONS, { value: "owner", label: "Owner" }]
                       : ROLE_OPTIONS;
                     return (
@@ -479,7 +479,7 @@ function WorkspaceManagerModal({
                               {isSelf && <Badge size="sm">You</Badge>}
                             </div>
                             <p className="truncate text-xs text-text-muted">{member.email || `@${member.username}`}</p>
-                            {isOwner && member.role !== "owner" && (
+                            {canRename && member.role !== "owner" && (
                               <p className="text-xs text-text-muted">
                                 Daily limit: {member.dailyTokenLimit ? `${formatDailyTokenLimitInput(member.dailyTokenLimit)} tokens` : "Unlimited"}
                               </p>
@@ -533,7 +533,7 @@ function WorkspaceManagerModal({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-text-main">{invite.email}</p>
                           <p className="text-xs text-text-muted">Expires {new Date(invite.expiresAt).toLocaleDateString()}</p>
-                          {isOwner && invite.dailyTokenLimit !== null && (
+                          {invite.dailyTokenLimit !== null && (
                             <p className="text-xs text-text-muted">
                               Daily limit: {invite.dailyTokenLimit ? `${formatDailyTokenLimitInput(invite.dailyTokenLimit)} tokens` : "Unlimited"}
                             </p>
@@ -601,6 +601,8 @@ export default function WorkspaceSwitcher({
   }, [menuOpen]);
 
   if (!activeWorkspace) return null;
+  const canCreate = isWorkspaceAdmin(activeWorkspace.role, currentUser?.id);
+  const canOpenManager = activeWorkspace.role === "owner" || isWorkspaceAdmin(activeWorkspace.role, currentUser?.id);
 
   const selectWorkspace = async (workspaceId) => {
     if (busy || workspaceId === activeWorkspaceId) return;
@@ -620,7 +622,7 @@ export default function WorkspaceSwitcher({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     }));
-    const created = { ...data.workspace, role: "owner" };
+    const created = data.workspace;
     onWorkspacesChange((current) => [...current, created]);
     setCreateOpen(false);
     await onSwitch(created.id);
@@ -695,8 +697,8 @@ export default function WorkspaceSwitcher({
               })}
             </div>
 
-            {activeWorkspace.role === "owner" && <div className="grid grid-cols-2 gap-2 border-t border-border-subtle bg-surface-2/40 p-2.5">
-              {activeWorkspace.role === "owner" && (
+            {(canOpenManager || canCreate) && <div className={`grid gap-2 border-t border-border-subtle bg-surface-2/40 p-2.5 ${canCreate && canOpenManager ? "grid-cols-2" : "grid-cols-1"}`}>
+              {canOpenManager && (
                 <button
                   type="button"
                   onClick={() => { setMenuOpen(false); setManageOpen(true); }}
@@ -706,25 +708,26 @@ export default function WorkspaceSwitcher({
                   Manage
                 </button>
               )}
-              <button
+              {canCreate && <button
                 type="button"
                 onClick={() => { setMenuOpen(false); setCreateOpen(true); }}
                 className="flex items-center justify-center gap-1.5 rounded-[9px] bg-brand-500 px-2 py-2 text-xs font-semibold text-white transition-colors hover:bg-brand-600"
               >
                 <span className="material-symbols-outlined text-[17px]">add</span>
                 New workspace
-              </button>
+              </button>}
             </div>}
           </div>
         )}
       </div>
 
-      {createOpen && (
+      {createOpen && canCreate && (
         <CreateWorkspaceModal isOpen onClose={() => setCreateOpen(false)} onCreate={createWorkspace} />
       )}
-      {manageOpen && activeWorkspace.role === "owner" && (
+      {manageOpen && canOpenManager && (
         <WorkspaceManagerModal
           isOpen
+          canGrantOwnership={canGrantWorkspaceOwnership(workspaces, currentUser?.id)}
           onClose={() => setManageOpen(false)}
           workspace={activeWorkspace}
           currentUser={currentUser}
@@ -741,6 +744,7 @@ RoleBadge.propTypes = { role: PropTypes.string.isRequired };
 InlineStatus.propTypes = { status: PropTypes.shape({ type: PropTypes.string, message: PropTypes.string }) };
 CreateWorkspaceModal.propTypes = { isOpen: PropTypes.bool, onClose: PropTypes.func, onCreate: PropTypes.func };
 WorkspaceManagerModal.propTypes = {
+  canGrantOwnership: PropTypes.bool,
   isOpen: PropTypes.bool,
   onClose: PropTypes.func,
   workspace: PropTypes.object,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth/workspaceAuth.js";
+import { requireUser, requireActiveWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { getWorkspacesForUser, createWorkspace } from "@/lib/db/repos/workspacesRepo.js";
+import { MIGRATED_ADMIN_USER_ID, WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -12,14 +13,15 @@ export async function GET(request) {
   return NextResponse.json({ workspaces }, { headers: { "Cache-Control": "no-store" } });
 }
 
-// Any authenticated user may create a workspace; creator becomes its owner.
+// Only an admin in the active workspace may create a new workspace.
 export async function POST(request) {
-  const { user, error } = await requireUser(request);
+  const { user, error } = await requireActiveWorkspaceAdmin(request);
   if (error) return error;
   const { name } = await request.json();
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
-  const workspace = await createWorkspace(name.trim(), user.id);
-  return NextResponse.json({ workspace }, { status: 201 });
+  const role = user.id === MIGRATED_ADMIN_USER_ID ? WORKSPACE_ROLES.OWNER : WORKSPACE_ROLES.ADMIN;
+  const workspace = await createWorkspace(name.trim(), user.id, role);
+  return NextResponse.json({ workspace: { ...workspace, role } }, { status: 201 });
 }

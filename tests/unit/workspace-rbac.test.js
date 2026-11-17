@@ -3,6 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import bcrypt from "bcryptjs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { DEFAULT_WORKSPACE_ID, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
+
+vi.mock("@/lib/auth/dashboardSession.js", () => ({
+  getDashboardAuthSession: async (token) => token ? JSON.parse(token) : null,
+}));
 
 const originalDataDir = process.env.DATA_DIR;
 let tempDir;
@@ -111,5 +116,60 @@ describe("workspace RBAC repository invariants", () => {
       "invite email does not match user",
     );
     expect(await workspaces.getPendingInviteByToken(invite.token)).not.toBeNull();
+  });
+});
+
+describe("workspace administration routes", () => {
+  function request(userId, activeWorkspaceId, body) {
+    return {
+      cookies: { get: () => ({ value: JSON.stringify({ userId, activeWorkspaceId }) }) },
+      json: async () => body,
+    };
+  }
+
+  it("denies workspace creation and roster changes to an ordinary owner", async () => {
+    const workspace = await workspaces.createWorkspace("Owner restrictions", owner.id);
+    await workspaces.addMember(workspace.id, invited.id, "member");
+    const context = { params: Promise.resolve({ id: workspace.id, userId: invited.id, inviteId: "pending" }) };
+    const req = request(owner.id, workspace.id, {
+      name: "Unauthorized", identifier: invited.username, email: "someone@example.com", role: "admin",
+    });
+    const routes = [
+      (await import("@/app/api/workspaces/route.js")).POST,
+      (await import("@/app/api/workspaces/[id]/route.js")).DELETE,
+      (await import("@/app/api/workspaces/[id]/members/route.js")).POST,
+      (await import("@/app/api/workspaces/[id]/members/onboard/route.js")).POST,
+      (await import("@/app/api/workspaces/[id]/invites/route.js")).POST,
+      (await import("@/app/api/workspaces/[id]/invites/[inviteId]/route.js")).DELETE,
+      (await import("@/app/api/workspaces/[id]/members/[userId]/route.js")).PATCH,
+      (await import("@/app/api/workspaces/[id]/members/[userId]/route.js")).DELETE,
+      (await import("@/app/api/workspaces/[id]/members/[userId]/profile/route.js")).PATCH,
+    ];
+    for (const route of routes) expect((await route(req, context)).status).toBe(403);
+    expect(await workspaces.getMember(workspace.id, invited.id)).toMatchObject({ role: "member" });
+  });
+
+  it("lets an admin create a workspace, add, change and remove a member", async () => {
+    const workspace = await workspaces.createWorkspace("Admin membership", invited.id, "admin");
+    const { POST: create } = await import("@/app/api/workspaces/route.js");
+    const response = await create(request(invited.id, workspace.id, { name: "Managed workspace" }));
+    expect(response.status).toBe(201);
+    const { workspace: created } = await response.json();
+    expect(created.role).toBe("admin");
+    expect(await workspaces.getMember(created.id, invited.id)).toMatchObject({ role: "admin" });
+    const context = { params: Promise.resolve({ id: created.id, userId: owner.id }) };
+    const { POST: add } = await import("@/app/api/workspaces/[id]/members/route.js");
+    const { PATCH, DELETE } = await import("@/app/api/workspaces/[id]/members/[userId]/route.js");
+    expect((await add(request(invited.id, created.id, { identifier: owner.username }), context)).status).toBe(201);
+    expect((await PATCH(request(invited.id, created.id, { role: "admin" }), context)).status).toBe(200);
+    expect(await workspaces.getMember(created.id, owner.id)).toMatchObject({ role: "admin" });
+    expect((await DELETE(request(invited.id, created.id), context)).status).toBe(200);
+    expect(await workspaces.getMember(created.id, owner.id)).toBeNull();
+  });
+
+  it("preserves workspace creation for the built-in admin with its legacy owner role", async () => {
+    const { POST } = await import("@/app/api/workspaces/route.js");
+    const response = await POST(request(MIGRATED_ADMIN_USER_ID, DEFAULT_WORKSPACE_ID, { name: "Built-in admin workspace" }));
+    expect(response.status).toBe(201);
   });
 });

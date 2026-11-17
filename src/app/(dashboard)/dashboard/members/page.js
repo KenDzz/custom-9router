@@ -6,6 +6,7 @@ import ModelAccessPanel from "@/shared/components/workspaces/ModelAccessPanel";
 import TokenSaverPanel from "@/shared/components/workspaces/TokenSaverPanel";
 import DailyTokenLimitInput from "@/shared/components/workspaces/DailyTokenLimitInput";
 import { formatDailyTokenLimitInput, normalizeDailyTokenLimitInput, parseDailyTokenLimit } from "@/shared/utils/dailyTokenLimit";
+import { canGrantWorkspaceOwnership, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID } from "@/lib/workspaces/constants.js";
 
 const ROLE_OPTIONS = [
   { value: "member", label: "Member" },
@@ -48,6 +49,7 @@ async function readResponse(response) {
 export default function MembersPage() {
   const [workspace, setWorkspace] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [canGrantOwnership, setCanGrantOwnership] = useState(false);
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -61,15 +63,22 @@ export default function MembersPage() {
   const [gifting, setGifting] = useState(false);
   const [resettingUsage, setResettingUsage] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const canEditRole = isWorkspaceAdmin(workspace?.role, currentUserId)
+    && (selected?.userId !== MIGRATED_ADMIN_USER_ID || selected?.userId === currentUserId);
+  const canEditAccount = canEditRole && (selected?.userId === currentUserId
+    || currentUserId === MIGRATED_ADMIN_USER_ID || selected?.role === "member");
 
   const loadMembers = async () => {
     setLoading(true);
     try {
       const me = await readResponse(await fetch("/api/users/me", { cache: "no-store" }));
       const active = (me.workspaces || []).find((item) => item.id === me.activeWorkspaceId);
-      if (!active || active.role !== "owner") throw new Error("Owner access required");
+      if (!active || (active.role !== "owner" && !isWorkspaceAdmin(active.role, me.user?.id))) {
+        throw new Error("Workspace manager access required");
+      }
       setWorkspace(active);
       setCurrentUserId(me.user?.id || null);
+      setCanGrantOwnership(canGrantWorkspaceOwnership(me.workspaces || [], me.user?.id));
       const data = await readResponse(await fetch(`/api/workspaces/${active.id}/members`, { cache: "no-store" }));
       setMembers(data.members || []);
     } catch (error) {
@@ -192,12 +201,14 @@ export default function MembersPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: form.username,
-          displayName: form.displayName,
-          email: form.email,
-          role: form.role,
+          ...(canEditAccount ? {
+            username: form.username,
+            displayName: form.displayName,
+            email: form.email,
+            ...(form.newPassword ? { newPassword: form.newPassword } : {}),
+          } : {}),
+          ...(canEditRole && form.role !== selected.role ? { role: form.role } : {}),
           dailyTokenLimit: limit,
-          ...(form.newPassword ? { newPassword: form.newPassword } : {}),
         }),
       }));
       setProfile(data);
@@ -224,10 +235,14 @@ export default function MembersPage() {
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-500">
             <span className="material-symbols-outlined text-[17px]">admin_panel_settings</span>
-            Owner controls
+            {isWorkspaceAdmin(workspace?.role, currentUserId) ? "Workspace administration" : "Workspace management"}
           </div>
           <h1 className="text-2xl font-bold text-text-main">Member management</h1>
-          <p className="mt-1 text-sm text-text-muted">Manage profiles, passwords, token limits and model access for {workspace?.name || "this workspace"}.</p>
+          <p className="mt-1 text-sm text-text-muted">
+            {isWorkspaceAdmin(workspace?.role, currentUserId)
+              ? `Manage profiles, roles, token limits and model access for ${workspace?.name}.`
+              : `Review members and manage token limits and model access for ${workspace?.name || "this workspace"}.`}
+          </p>
         </div>
         <Badge variant="primary" icon="group">{members.length} members</Badge>
       </div>
@@ -329,12 +344,15 @@ export default function MembersPage() {
                 </div>
               )}
 
-              <p className="text-xs text-text-muted">Profile and password changes apply to this account in all workspaces. Role and daily limit apply only to this workspace.</p>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Input label="Username" aria-label="Username" value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} required />
-                <Input label="Display name" aria-label="Display name" value={form.displayName} onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))} />
-                <Input label="Email" aria-label="Email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
-                <Select label="Workspace role" aria-label="Workspace role" options={ROLE_OPTIONS} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} />
+                {canEditAccount && <>
+                  <Input label="Username" aria-label="Username" value={form.username} onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))} required />
+                  <Input label="Display name" aria-label="Display name" value={form.displayName} onChange={(event) => setForm((current) => ({ ...current, displayName: event.target.value }))} />
+                  <Input label="Email" aria-label="Email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
+                </>}
+                {canEditRole && (
+                  <Select label="Workspace role" aria-label="Workspace role" options={canGrantOwnership || selected.role === "owner" ? ROLE_OPTIONS : ROLE_OPTIONS.filter(({ value }) => value !== "owner")} value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} />
+                )}
               </div>
 
               <div className="rounded-[14px] border border-border-subtle p-4">
@@ -426,11 +444,11 @@ export default function MembersPage() {
               {profile && <ModelAccessPanel key={selected.userId} workspaceId={workspace.id} userId={selected.userId} />}
               {profile && <TokenSaverPanel key={`token-saver:${selected.userId}`} workspaceId={workspace.id} userId={selected.userId} />}
 
-              <div className="rounded-[14px] border border-border-subtle p-4">
+              {canEditAccount && <div className="rounded-[14px] border border-border-subtle p-4">
                 <h4 className="font-semibold text-text-main">Reset password</h4>
-                <p className="mb-4 text-xs text-text-muted">Leave empty to keep the current password. Minimum 8 characters.</p>
+                <p className="mb-4 text-xs text-text-muted">Changes apply to this account in all workspaces. Leave empty to keep the current password.</p>
                 <Input type="password" label="New password" aria-label="New password" value={form.newPassword} onChange={(event) => setForm((current) => ({ ...current, newPassword: event.target.value }))} autoComplete="new-password" />
-              </div>
+              </div>}
 
               {status.message && (
                 <div className={`rounded-[10px] px-3 py-2.5 text-sm ${status.type === "error" ? "bg-red-500/10 text-red-600" : "bg-green-500/10 text-green-600"}`}>

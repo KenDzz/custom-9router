@@ -13,13 +13,13 @@ check for collisions on each upgrade rather than assuming zero merge risk:
 
 - `src/lib/workspaces/constants.js` — role enum, `WORKSPACE_ROLE_ORDER`, deterministic Default/admin IDs, `ROUTING_TABLES`.
 - `src/lib/workspaces/requestContext.js` — `AsyncLocalStorage`-based per-request workspace context; `runWithWorkspace`, `getWorkspaceContext`, `requireWorkspaceId` (fail-closed), `withDashboardWorkspace`, `withLlmWorkspace`. Also exports `enterWorkspaceForTest(context)` — test-only, calls `als.enterWith()` from a `beforeEach`/`beforeAll` hook so a whole test file shares one workspace context instead of wrapping every `it()` in `runWithWorkspace()`.
-- `src/lib/auth/workspaceAuth.js` — `requireUser`, `requireWorkspaceRole`, `requireDefaultOwner`. Membership is always re-read from DB; JWT role is a cache hint only.
+- `src/lib/auth/workspaceAuth.js` — workspace authorization. Membership is always re-read from DB; JWT role is a cache hint only.
 - `src/lib/db/repos/usersRepo.js`, `src/lib/db/repos/workspacesRepo.js` — identity/workspace/membership/invite CRUD.
 - `src/lib/db/helpers/workspaceKvStore.js` — `workspaceKv` table accessor, same shape as `makeKv()` plus `workspaceId`.
 - `src/lib/db/migrations/002-workspaces-rbac.js` — schema v1→v2 migration.
 - `src/lib/db/migrations/003-member-token-limits.js` — additive quota, key-owner, and usage-owner migration.
 - `src/lib/db/repos/memberAccessRepo.js` — trusted per-member quota and usage aggregation.
-- `src/lib/db/repos/memberManagementRepo.js` — atomic owner profile/password/role/limit changes.
+- `src/lib/db/repos/memberManagementRepo.js` — atomic profile, password, role and quota changes.
 - `src/lib/workspaces/memberPolicy.js`, `memberUsage.js` — restricted member surface, per-request usage completion, and JSON token-usage adapter. Members can send concurrent requests; recorded usage controls their soft daily limit.
 - `src/app/api/workspaces/**`, `src/app/api/auth/workspace/route.js`, `src/app/api/auth/invite/accept/route.js`, `src/app/api/users/me/route.js` — new route trees.
 - `src/app/api/member/**`, `src/app/(dashboard)/dashboard/member/page.js`, and `src/app/(dashboard)/dashboard/members/page.js` — isolated member/owner surfaces.
@@ -109,7 +109,12 @@ a real user identity to attribute to. Changed `extractApiKey` from private
 to `export`ed so `requestContext.js` can reuse it.
 Member sessions are deny-by-default for dashboard pages/APIs; owners retain
 the existing upstream surface while members use `/dashboard/member` and
-`/api/member/**`.
+`/api/member/**`. Within Workspace, only an admin can create a workspace,
+manage invitations, or add, remove and change the roles of members. An ordinary
+owner can still manage quotas and routing. The built-in admin retains Workspace
+administration despite its legacy `owner` membership. Only Default workspace
+admins can grant the `owner` role, which also unlocks the upstream dashboard.
+New OIDC and SAML users start as members until explicitly promoted.
 **Invariant:** `WORKSPACE_PROTECTED_PATHS` must be checked before the
 `requireLogin=false`/local-bypass logic, never after. A merge that adds new
 member/workspace-management routes must add their prefix to this list.

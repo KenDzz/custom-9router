@@ -4,7 +4,7 @@ import { POST as ownerReset } from "../../src/app/api/workspaces/[id]/members/[u
 import { POST as memberReset } from "../../src/app/api/member/reset-usage/route.js";
 
 const mocks = vi.hoisted(() => ({
-  requireWorkspaceRole: vi.fn(),
+  requireWorkspaceManager: vi.fn(),
   withDashboardWorkspace: vi.fn(),
   createMemberGift: vi.fn(),
   resetMemberQuotaUsage: vi.fn(),
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   getMemberDashboard: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/workspaceAuth.js", () => ({ requireWorkspaceRole: mocks.requireWorkspaceRole }));
+vi.mock("@/lib/auth/workspaceAuth.js", () => ({ requireWorkspaceManager: mocks.requireWorkspaceManager }));
 vi.mock("@/lib/workspaces/requestContext.js", () => ({ withDashboardWorkspace: mocks.withDashboardWorkspace }));
 vi.mock("@/lib/db/repos/memberGiftsRepo.js", () => ({
   createMemberGift: mocks.createMemberGift,
@@ -31,7 +31,7 @@ const context = { params: Promise.resolve({ id: "workspace-1", userId: "member-1
 describe("member gift API permissions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireWorkspaceRole.mockResolvedValue({ user: { id: "owner-1" } });
+    mocks.requireWorkspaceManager.mockResolvedValue({ user: { id: "owner-1" } });
     mocks.withDashboardWorkspace.mockImplementation((_request, _role, handler) =>
       handler({ user: { id: "member-1" }, session: { activeWorkspaceId: "workspace-1" } }));
     mocks.getMemberTokenStatus.mockResolvedValue({ usedTokens: 0 });
@@ -40,11 +40,11 @@ describe("member gift API permissions", () => {
 
   it("requires owner role before granting or directly resetting", async () => {
     const denied = Response.json({ error: "Forbidden" }, { status: 403 });
-    mocks.requireWorkspaceRole.mockResolvedValue({ error: denied });
+    mocks.requireWorkspaceManager.mockResolvedValue({ error: denied });
     const request = new Request("http://localhost/gifts", { method: "POST", body: "{}" });
     expect((await grantGift(request, context)).status).toBe(403);
     expect((await ownerReset(request, context)).status).toBe(403);
-    expect(mocks.requireWorkspaceRole).toHaveBeenCalledWith(request, "workspace-1", "owner");
+    expect(mocks.requireWorkspaceManager).toHaveBeenCalledWith(request, "workspace-1");
     expect(mocks.createMemberGift).not.toHaveBeenCalled();
     expect(mocks.resetMemberQuotaUsage).not.toHaveBeenCalled();
   });

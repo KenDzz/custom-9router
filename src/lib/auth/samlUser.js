@@ -21,7 +21,7 @@ export async function resolveSamlUser(profile, settings, { email, name }) {
   }
   let memberships = await getWorkspacesForUser(user.id);
   if (!memberships.length) {
-    await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.ADMIN);
+    await addMember(DEFAULT_WORKSPACE_ID, user.id, WORKSPACE_ROLES.MEMBER);
     memberships = await getWorkspacesForUser(user.id);
   }
   const active = memberships.find((workspace) => workspace.isDefault) || memberships[0];

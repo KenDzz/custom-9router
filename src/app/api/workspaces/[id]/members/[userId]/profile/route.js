@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceRole } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceManager, canGrantWorkspaceOwnership } from "@/lib/auth/workspaceAuth.js";
 import { getMember } from "@/lib/db/repos/workspacesRepo.js";
 import {
   getUserByEmail,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/db/repos/usersRepo.js";
 import { updateMemberProfile } from "@/lib/db/repos/memberManagementRepo.js";
 import { getMemberDashboard } from "@/lib/db/repos/memberAccessRepo.js";
-import { isWorkspaceRole, WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
+import { isWorkspaceRole, isWorkspaceAdmin, MIGRATED_ADMIN_USER_ID, WORKSPACE_ROLES } from "@/lib/workspaces/constants.js";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ async function loadProfile(workspaceId, userId) {
 
 export async function GET(request, { params }) {
   const { id, userId } = await params;
-  const { error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.OWNER);
+  const { error } = await requireWorkspaceManager(request, id);
   if (error) return error;
   const profile = await loadProfile(id, userId);
   if (!profile) return NextResponse.json({ error: "Member not found" }, { status: 404 });
@@ -35,16 +35,25 @@ export async function GET(request, { params }) {
 
 export async function PATCH(request, { params }) {
   const { id, userId } = await params;
-  const { error, user: actor } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.OWNER);
+  const { error, user: actor, member } = await requireWorkspaceManager(request, id);
   if (error) return error;
+  const body = await request.json();
+  const accountOrRoleEdit = ["role", "username", "email", "displayName", "newPassword"]
+    .some((field) => Object.hasOwn(body, field));
+  if (accountOrRoleEdit && (!isWorkspaceAdmin(member.role, actor.id)
+    || (userId === MIGRATED_ADMIN_USER_ID && actor.id !== userId))) {
+    return NextResponse.json({ error: "Admin access required to edit this account or role" }, { status: 403 });
+  }
   const currentMember = await getMember(id, userId);
   const currentUser = await getUserById(userId);
   if (!currentMember || !currentUser) return NextResponse.json({ error: "Member not found" }, { status: 404 });
 
-  const body = await request.json();
   const updates = {};
   if (body.role !== undefined) {
     if (!isWorkspaceRole(body.role)) return NextResponse.json({ error: "Invalid workspace role" }, { status: 400 });
+    if (body.role === WORKSPACE_ROLES.OWNER && currentMember.role !== body.role && !(await canGrantWorkspaceOwnership(actor.id))) {
+      return NextResponse.json({ error: "Default workspace admin access required to grant ownership" }, { status: 403 });
+    }
     updates.role = body.role;
   }
   if (body.username !== undefined) {

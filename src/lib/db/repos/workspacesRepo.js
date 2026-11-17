@@ -77,7 +77,7 @@ export async function getWorkspacesForUser(userId) {
   }));
 }
 
-export async function createWorkspace(name, createdByUserId) {
+export async function createWorkspace(name, createdByUserId, creatorRole = WORKSPACE_ROLES.OWNER) {
   const db = await getAdapter();
   const now = new Date().toISOString();
   const workspace = { id: uuidv4(), name, isDefault: false, createdByUserId, createdAt: now, updatedAt: now };
@@ -88,7 +88,7 @@ export async function createWorkspace(name, createdByUserId) {
     );
     db.run(
       `INSERT INTO workspaceMembers(workspaceId, userId, role, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?)`,
-      [workspace.id, createdByUserId, WORKSPACE_ROLES.OWNER, now, now]
+      [workspace.id, createdByUserId, creatorRole, now, now]
     );
   });
   return workspace;
@@ -149,7 +149,8 @@ export async function addMember(workspaceId, userId, role, options = {}) {
     `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)
      ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role,
        dailyTokenLimit = ${hasLimit ? "excluded.dailyTokenLimit" : "workspaceMembers.dailyTokenLimit"},
-       updatedAt = excluded.updatedAt`,
+       updatedAt = excluded.updatedAt
+     WHERE workspaceMembers.role != 'owner'`,
     [workspaceId, userId, role, limit, now, now]
   );
 }
@@ -266,7 +267,8 @@ export async function acceptInvite(inviteId, userId) {
     db.run(
       `INSERT INTO workspaceMembers(workspaceId, userId, role, dailyTokenLimit, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)
        ON CONFLICT(workspaceId, userId) DO UPDATE SET role = excluded.role,
-         dailyTokenLimit = COALESCE(?, workspaceMembers.dailyTokenLimit), updatedAt = excluded.updatedAt`,
+         dailyTokenLimit = COALESCE(?, workspaceMembers.dailyTokenLimit), updatedAt = excluded.updatedAt
+       WHERE workspaceMembers.role != 'owner'`,
       [row.workspaceId, userId, row.role, row.dailyTokenLimit ?? 0, now, now, row.dailyTokenLimit]
     );
   });

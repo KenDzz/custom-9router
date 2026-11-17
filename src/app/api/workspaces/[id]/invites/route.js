@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireWorkspaceRole } from "@/lib/auth/workspaceAuth.js";
+import { requireWorkspaceRole, requireWorkspaceAdmin } from "@/lib/auth/workspaceAuth.js";
 import { getInvitesForWorkspace, createInvite } from "@/lib/db/repos/workspacesRepo.js";
 import { WORKSPACE_ROLES, isWorkspaceRole } from "@/lib/workspaces/constants.js";
 
@@ -16,7 +16,7 @@ export async function GET(request, { params }) {
 
 export async function POST(request, { params }) {
   const { id } = await params;
-  const { user, member, error } = await requireWorkspaceRole(request, id, WORKSPACE_ROLES.ADMIN);
+  const { user, error } = await requireWorkspaceAdmin(request, id);
   if (error) return error;
   const { email, role = WORKSPACE_ROLES.MEMBER, dailyTokenLimit } = await request.json();
   if (!email || typeof email !== "string") {
@@ -25,9 +25,6 @@ export async function POST(request, { params }) {
   // Owner role can never be invited directly (also enforced by schema CHECK).
   if (!isWorkspaceRole(role) || role === WORKSPACE_ROLES.OWNER) {
     return NextResponse.json({ error: "invalid role" }, { status: 400 });
-  }
-  if (dailyTokenLimit !== undefined && member.role !== WORKSPACE_ROLES.OWNER) {
-    return NextResponse.json({ error: "Owner access required to set a daily token limit" }, { status: 403 });
   }
   if (dailyTokenLimit !== undefined && (!Number.isSafeInteger(dailyTokenLimit) || dailyTokenLimit < 0 || dailyTokenLimit > 1_000_000_000_000)) {
     return NextResponse.json({ error: "Daily token limit must be an integer from 0 to 1,000,000,000,000" }, { status: 400 });

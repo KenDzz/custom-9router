@@ -251,16 +251,16 @@ describe("LLM boundary enforcement", () => {
   });
 });
 
-describe("Owner-only model management API", () => {
+describe("Workspace manager model management API", () => {
   const apiRequest = (token, method = "GET", body = undefined) => new NextRequest(`http://localhost/api/workspaces/${workspace.id}/model-access`, { method, headers: { cookie: `auth_token=${token}`, "content-type": "application/json" }, ...(method !== "GET" && body ? { body: JSON.stringify(body) } : {}) });
   const params = (userId) => ({ params: Promise.resolve({ id: workspace.id, ...(userId ? { userId } : {}) }) });
-  it.each(["GET", "PATCH"])("denies %s to Member and Admin even with stale Owner claims", async (method) => {
-    for (const role of ["member", "admin"]) {
-      await workspaces.updateMemberRole(workspace.id, member.id, role);
-      for (const userId of [undefined, member.id]) {
-        expect((await routes.handleModelAccess(apiRequest("member", method, restricted()), params(userId))).status).toBe(403);
-      }
+  it.each(["GET", "PATCH"])("uses the current membership role for %s despite stale claims", async (method) => {
+    await workspaces.updateMemberRole(workspace.id, member.id, "member");
+    for (const userId of [undefined, member.id]) {
+      expect((await routes.handleModelAccess(apiRequest("member", method, restricted()), params(userId))).status).toBe(403);
     }
+    await workspaces.updateMemberRole(workspace.id, member.id, "admin");
+    expect((await routes.handleModelAccess(apiRequest("member", method, restricted()), params(member.id))).status).toBe(200);
   });
   it("permits Owner configuration and returns a credential-free local catalog", async () => {
     const response = await routes.handleModelAccess(apiRequest("owner"), params());

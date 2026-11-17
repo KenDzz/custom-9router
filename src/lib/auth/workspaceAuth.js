@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getDashboardAuthSession } from "./dashboardSession.js";
 import { getUserById, toPublicUser } from "@/lib/db/repos/usersRepo.js";
 import { getMember } from "@/lib/db/repos/workspacesRepo.js";
-import { WORKSPACE_ROLES, hasWorkspaceRole, DEFAULT_WORKSPACE_ID } from "@/lib/workspaces/constants.js";
+import { WORKSPACE_ROLES, hasWorkspaceRole, DEFAULT_WORKSPACE_ID, isWorkspaceAdmin } from "@/lib/workspaces/constants.js";
 
 function unauthorized(message = "Unauthorized") {
   return { error: NextResponse.json({ error: message }, { status: 401 }) };
@@ -41,4 +41,30 @@ export async function requireWorkspaceRole(request, workspaceId, minimumRole = W
 // owner of the Default workspace.
 export async function requireDefaultOwner(request) {
   return requireWorkspaceRole(request, DEFAULT_WORKSPACE_ID, WORKSPACE_ROLES.OWNER);
+}
+
+export async function requireWorkspaceAdmin(request, workspaceId) {
+  const auth = await requireWorkspaceRole(request, workspaceId);
+  if (auth.error) return auth;
+  return isWorkspaceAdmin(auth.member.role, auth.user.id) ? auth : forbidden("Admin access required");
+}
+
+export async function requireActiveWorkspaceAdmin(request) {
+  const auth = await requireUser(request);
+  if (auth.error) return auth;
+  const member = auth.session.activeWorkspaceId
+    ? await getMember(auth.session.activeWorkspaceId, auth.user.id) : null;
+  return isWorkspaceAdmin(member?.role, auth.user.id) ? auth : forbidden("Admin access required");
+}
+
+export async function canGrantWorkspaceOwnership(userId) {
+  const member = await getMember(DEFAULT_WORKSPACE_ID, userId);
+  return isWorkspaceAdmin(member?.role, userId);
+}
+
+export async function requireWorkspaceManager(request, workspaceId) {
+  const auth = await requireWorkspaceRole(request, workspaceId);
+  if (auth.error) return auth;
+  return auth.member.role === WORKSPACE_ROLES.OWNER || isWorkspaceAdmin(auth.member.role, auth.user.id)
+    ? auth : forbidden();
 }
