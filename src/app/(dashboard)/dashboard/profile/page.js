@@ -277,6 +277,21 @@ export default function ProfilePage() {
     }
   };
 
+  const updateKeyAffinity = async (enabled) => {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roundRobinKeyAffinity: enabled }),
+      });
+      if (res.ok) {
+        setSettings(prev => ({ ...prev, roundRobinKeyAffinity: enabled }));
+      }
+    } catch (err) {
+      console.error("Failed to update key affinity:", err);
+    }
+  };
+
   const updateComboStrategy = async (strategy) => {
     try {
       const res = await fetch("/api/settings", {
@@ -1458,13 +1473,32 @@ export default function ProfilePage() {
               />
             </div>
 
+            {/* Key affinity: keep each API key on one account (prompt cache) */}
+            {settings.fallbackStrategy === "round-robin" && (
+              <div className="flex items-start sm:items-center justify-between gap-4 pt-2 border-t border-border/50">
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm sm:text-base">Keep Each API Key on One Account</p>
+                  <p className="text-xs sm:text-sm text-text-muted">
+                    Reuses the upstream prompt cache; moves a key only when its account is unavailable
+                  </p>
+                </div>
+                <Toggle
+                  checked={settings.roundRobinKeyAffinity !== false}
+                  onChange={() => updateKeyAffinity(settings.roundRobinKeyAffinity === false)}
+                  disabled={loading}
+                />
+              </div>
+            )}
+
             {/* Sticky Round Robin Limit */}
             {settings.fallbackStrategy === "round-robin" && (
               <div className="flex items-start sm:items-center justify-between gap-4 pt-2 border-t border-border/50">
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-sm sm:text-base">Sticky Limit</p>
                   <p className="text-xs sm:text-sm text-text-muted">
-                    Calls per account before switching
+                    {settings.roundRobinKeyAffinity !== false
+                      ? "Calls per account before switching, for requests without an API key"
+                      : "Calls per account before switching"}
                   </p>
                 </div>
                 <Input
@@ -1517,7 +1551,9 @@ export default function ProfilePage() {
 
             <p className="text-xs text-text-muted italic pt-2 border-t border-border/50">
               {settings.fallbackStrategy === "round-robin"
-                ? `Currently distributing requests across all available accounts with ${settings.stickyRoundRobinLimit || 3} calls per account.`
+                ? (settings.roundRobinKeyAffinity !== false
+                  ? "Currently spreading API keys across all available accounts, each key staying on its own account."
+                  : `Currently distributing requests across all available accounts with ${settings.stickyRoundRobinLimit || 3} calls per account.`)
                 : "Currently using accounts in priority order (Fill First)."}
               {settings.comboStrategy === "round-robin"
                 ? ` Combos rotate after ${settings.comboStickyRoundRobinLimit || 1} call${(settings.comboStickyRoundRobinLimit || 1) === 1 ? "" : "s"} per model.`

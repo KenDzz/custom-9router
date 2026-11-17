@@ -12,6 +12,9 @@ const DEFAULT_SETTINGS = {
   tailscaleEnabled: false,
   tailscaleUrl: "",
   stickyRoundRobinLimit: 3,
+  // Round-robin keeps each API key on one account (prompt-cache affinity);
+  // stickyRoundRobinLimit then only applies to requests without an API key.
+  roundRobinKeyAffinity: true,
   providerStrategies: {},
   quotaVisibility: {},
   comboStrategy: "fallback",

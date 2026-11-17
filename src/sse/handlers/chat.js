@@ -7,6 +7,7 @@ import {
   extractApiKey,
   isValidApiKey,
 } from "../services/auth.js";
+import { affinityKeyFromApiKey } from "../services/accountAffinity.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
 import { getEffectiveTokenSaverSettings } from "@/lib/db/repos/tokenSaverRepo.js";
@@ -276,9 +277,12 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastError = null;
   let lastStatus = null;
   let lastHeaders = null;
+  // Same API key → same upstream account (round-robin + key affinity), so the
+  // caller's prompt cache is reused instead of rebuilt on every account.
+  const affinityKey = affinityKeyFromApiKey(apiKey);
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model });
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model, affinityKey });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
