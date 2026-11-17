@@ -23,7 +23,7 @@ export default function DailyTokenLimitInput({ value, onChange, disabled = false
       disabled={disabled}
       maxLength={17}
       error={invalid ? "Enter a whole number from 0 to 1,000,000,000,000." : undefined}
-      hint={disabled ? "Owners always have unlimited usage." : "0 = unlimited · Commas separate thousands."}
+      hint={disabled ? "Owners always have unlimited usage." : "0 = unlimited · Standard tokens (1M = $2 of model cost)."}
     />
   );
 }

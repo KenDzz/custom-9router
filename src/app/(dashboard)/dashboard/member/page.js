@@ -199,6 +199,7 @@ export default function MemberDashboardPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-muted">Daily token allowance</p>
+              <p className="mt-1 text-xs text-text-muted">Counted in standard tokens: 1M = $2 of model cost.</p>
               {!!token?.tokenGiftRemaining && <p className="mt-1 text-xs text-brand-500">+ {formatExactNumber(token.tokenGiftRemaining)} gift tokens available</p>}
             </div>
             <div className={`grid size-11 place-items-center rounded-[12px] ${token?.limitReached ? "bg-red-500/10 text-red-500" : "bg-brand-500/10 text-brand-500"}`}>

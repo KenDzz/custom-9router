@@ -4,6 +4,7 @@ import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLock
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
 import { getAntigravityQuotaCache, getAntigravityModelQuota } from "./antigravityQuota.js";
+import { pickAffinityConnection } from "./accountAffinity.js";
 import * as log from "../utils/logger.js";
 
 // Mutex to prevent race conditions during account selection
@@ -24,6 +25,11 @@ function githubMonthlyResetMs(status, errorText, provider) {
  * @param {string} provider - Provider name
  * @param {Set<string>|string|null} excludeConnectionIds - Connection ID(s) to exclude (for retry with next account)
  * @param {string|null} model - Model name for per-model rate limit filtering
+ * @param {object} [options]
+ * @param {string|null} [options.preferredConnectionId] - Pin to this connection when available
+ * @param {string|null} [options.requestedModel] - Client-facing model id (Codex enabledModels filter)
+ * @param {string|null} [options.affinityKey] - Opaque caller id (see affinityKeyFromApiKey); under
+ *   round-robin with key affinity on, the same caller stays on the same account
  */
 export async function getProviderCredentials(provider, excludeConnectionIds = null, model = null, options = {}) {
   // Normalize to Set for consistent handling
@@ -32,6 +38,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     : (excludeConnectionIds ? new Set([excludeConnectionIds]) : new Set());
   const preferredConnectionId = options?.preferredConnectionId || null;
   const requestedModel = options?.requestedModel || model;
+  const affinityKey = options?.affinityKey || null;
   // Acquire mutex to prevent race conditions
   const currentMutex = selectionMutex;
   let resolveMutex;
@@ -153,8 +160,23 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
         log.info("AUTH", `${provider} | pinned to ${connection.id?.slice(0, 8)} (${connection.name || connection.email || "unnamed"})`);
       }
     }
+    // Key affinity (round-robin only): keep each caller on one account so its
+    // upstream prompt cache stays warm, instead of rotating every caller across
+    // all accounts. Per-provider override wins; on by default.
+    const keyAffinity = strategy === "round-robin"
+      && (providerOverride.keyAffinity ?? settings.roundRobinKeyAffinity ?? true) !== false;
+    const affinityConnection = !connection && keyAffinity
+      ? pickAffinityConnection(availableConnections, affinityKey)
+      : null;
+
     if (connection) {
       // skip strategy
+    } else if (affinityConnection) {
+      connection = affinityConnection;
+      log.debug("AUTH", `${provider} | key affinity → ${connection.id?.slice(0, 8)}`);
+      // Keep lastUsedAt current for the dashboard; leave consecutiveUseCount to
+      // the rotation path used by callers without an affinity key.
+      await updateProviderConnection(connection.id, { lastUsedAt: new Date().toISOString() });
     } else if (strategy === "round-robin") {
       const stickyLimit = providerOverride.stickyRoundRobinLimit || settings.stickyRoundRobinLimit || 3;
 

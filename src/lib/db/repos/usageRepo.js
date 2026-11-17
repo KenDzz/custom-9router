@@ -146,21 +146,25 @@ async function ensureRingInitialized(workspaceId = requireWorkspaceId()) {
   } catch {}
 }
 
+// Returns the cost and the member quota charge (standard tokens, see
+// standardTokens.js). Both use the same pricing lookup and the same math.
 async function calculateCost(provider, model, tokens) {
-  if (!tokens || !provider || !model) return 0;
+  const { computeQuotaTokens } = await import("@/lib/workspaces/standardTokens.js");
+  if (!tokens || !provider || !model) return { cost: 0, quota: computeQuotaTokens(tokens, null) };
   try {
     const { getPricingForModel } = await import("./pricingRepo.js");
     const pricing = await getPricingForModel(provider, model);
-    if (!pricing) return 0;
+    const quota = computeQuotaTokens(tokens, pricing);
+    if (!pricing) return { cost: 0, quota };
 
     // Delegate the actual math to the single source of truth (avoids the two
     // copies drifting apart — see open-sse/providers/pricing.js for the
     // cache-inclusive prompt_tokens convention this assumes).
     const { calculateCostFromTokens } = await import("open-sse/providers/pricing.js");
-    return calculateCostFromTokens(tokens, pricing);
+    return { cost: calculateCostFromTokens(tokens, pricing), quota };
   } catch (e) {
     console.error("Error calculating cost:", e);
-    return 0;
+    return { cost: 0, quota: computeQuotaTokens(tokens, null) };
   }
 }
 
@@ -280,11 +284,14 @@ async function persistRequestUsage(entry) {
     const db = await getAdapter();
 
     if (!record.timestamp) record.timestamp = new Date().toISOString();
-    record.cost = await calculateCost(record.provider, record.model, record.tokens);
+    const { cost, quota } = await calculateCost(record.provider, record.model, record.tokens);
+    record.cost = cost;
 
     const tokens = record.tokens || {};
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
+    const quotaInputTokens = quota.input;
+    const quotaOutputTokens = quota.output;
 
     let inserted = false;
 
@@ -321,14 +328,15 @@ async function persistRequestUsage(entry) {
       }
 
       chargeTokenGiftsForUsage(db, workspaceId, record.userId, record.timestamp,
-          Number(promptTokens), Number(completionTokens));
+          quotaInputTokens, quotaOutputTokens);
       db.run(
-        `INSERT INTO usageHistory(workspaceId, userId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, status, tokens, meta)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO usageHistory(workspaceId, userId, timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, quotaInputTokens, quotaOutputTokens, cost, status, tokens, meta)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           workspaceId, record.userId, record.timestamp, record.provider || null, record.model || null,
           record.connectionId || null, record.apiKey || null, record.endpoint || null,
-          promptTokens, completionTokens, record.cost || 0, record.status || "ok",
+          promptTokens, completionTokens, quotaInputTokens, quotaOutputTokens,
+          record.cost || 0, record.status || "ok",
           stringifyJson(tokens), usageMeta,
         ]
       );
