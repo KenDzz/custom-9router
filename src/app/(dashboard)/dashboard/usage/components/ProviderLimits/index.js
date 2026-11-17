@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
+import QuotaStatus from "./QuotaStatus";
+import { HISTORY_KEY, quotaSeverity, recordQuotaSnapshot } from "./statusHistory";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -160,6 +162,8 @@ export default function ProviderLimits() {
   const pathname = usePathname();
   const [connections, setConnections] = useState([]);
   const [quotaData, setQuotaData] = useState({});
+  const [quotaHistory, setQuotaHistory] = useState({});
+  const quotaHistoryRef = useRef({});
   const [loading, setLoading] = useState({});
   const [errors, setErrors] = useState({});
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -331,6 +335,15 @@ export default function ProviderLimits() {
         [connectionId]: quotaEntry,
       }));
       setQuotaCache(connectionId, quotaEntry);
+      const previous = quotaHistoryRef.current;
+      const history = recordQuotaSnapshot(previous, connectionId, quotaSeverity(parsedQuotas));
+      if (history !== previous) {
+        quotaHistoryRef.current = history;
+        setQuotaHistory(history);
+        try {
+          window.localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        } catch { /* The current session still keeps its observations. */ }
+      }
     } catch (error) {
       console.error(
         `[ProviderLimits] Error fetching quota for ${provider} (${connectionId}):`,
@@ -589,6 +602,13 @@ export default function ProviderLimits() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    try {
+      const history = JSON.parse(window.localStorage.getItem(HISTORY_KEY) || "{}");
+      if (history && typeof history === "object" && !Array.isArray(history)) {
+        quotaHistoryRef.current = history;
+        setQuotaHistory(history);
+      }
+    } catch { /* A missing or invalid history does not affect quota checks. */ }
     const stored = window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY);
     setAutoRefresh(stored === null ? true : stored === "true");
     setHasHydratedAutoRefresh(true);
@@ -891,6 +911,8 @@ export default function ProviderLimits() {
 
   return (
     <div className="space-y-6">
+      <QuotaStatus connections={sortedConnections} quotaData={quotaData} errors={errors} loading={loading}
+        history={quotaHistory} lastUpdated={lastUpdated} />
       {/* Header Controls */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-end">
         <div className="flex flex-wrap items-center gap-1.5">
